@@ -6,6 +6,7 @@ from typing import Any
 
 from googleapiclient.discovery import build  # type: ignore[import-untyped]
 from googleapiclient.errors import HttpError  # type: ignore[import-untyped]
+from httplib2 import HttpLib2Error  # type: ignore[import-untyped]
 
 from app.config import Config
 from app.retry import retry_with_backoff
@@ -38,7 +39,16 @@ class GoogleSheetsProvider(SpreadsheetProvider):
         return cls(config=config, service_factory=service_factory)
 
     def load_rows(self) -> list[dict[str, object]]:
-        values = self._fetch_values_with_retry()
+        try:
+            values = self._fetch_values_with_retry()
+        except (
+            _RetryableSpreadsheetError,
+            TimeoutError,
+            ConnectionError,
+        ) as exc:
+            raise SpreadsheetError(
+                "Sheets API request failed after retries were exhausted"
+            ) from exc
         if not values:
             return []
 
@@ -83,6 +93,10 @@ class GoogleSheetsProvider(SpreadsheetProvider):
                     "Transient Sheets API failure"
                 ) from exc
             raise SpreadsheetError("Sheets API request failed") from exc
+        except HttpLib2Error as exc:
+            raise _RetryableSpreadsheetError(
+                "Transient Sheets transport failure"
+            ) from exc
         values = response.get("values", [])
         if not isinstance(values, list):
             raise SpreadsheetError("Sheets API returned an invalid values payload")

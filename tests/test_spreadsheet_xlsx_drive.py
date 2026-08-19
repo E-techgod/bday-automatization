@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
+from httplib2 import HttpLib2Error  # type: ignore[import-untyped]
 from openpyxl import Workbook
 
 from app.birthday_rules import parse_birthday
@@ -219,24 +220,124 @@ def test_xlsx_drive_load_rows_consumes_only_header_before_resolving() -> None:
     workbook.close.assert_called_once_with()
 
 
+def test_xlsx_drive_load_rows_retries_transport_error_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("app.retry.time.sleep", sleep_calls.append)
+    service = _FakeDriveService(
+        _build_workbook_bytes(
+            ["Name", "Email", "Birthday"],
+            ["Test Person", "test.person@example.com", "2000-01-02"],
+        ),
+        execute_side_effects=[HttpLib2Error("synthetic transport failure")],
+    )
+    provider = XlsxDriveProvider(
+        config=_build_config(),
+        service_factory=lambda: service,
+    )
+
+    rows = provider.load_rows()
+
+    assert rows == [
+        {
+            "Name": "Test Person",
+            "Email": "test.person@example.com",
+            "Birthday": "2000-01-02",
+        }
+    ]
+    assert service.execute_calls == 2
+    assert sleep_calls == [1.0]
+
+
+def test_xlsx_drive_load_rows_retries_transport_error_until_attempts_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("app.retry.time.sleep", sleep_calls.append)
+    service = _FakeDriveService(
+        _build_workbook_bytes(
+            ["Name", "Email", "Birthday"],
+            ["Test Person", "test.person@example.com", "2000-01-02"],
+        ),
+        execute_side_effects=[
+            HttpLib2Error("synthetic transport failure"),
+            HttpLib2Error("synthetic transport failure"),
+            HttpLib2Error("synthetic transport failure"),
+        ],
+    )
+    provider = XlsxDriveProvider(
+        config=_build_config(),
+        service_factory=lambda: service,
+    )
+
+    with pytest.raises(
+        SpreadsheetError, match="Drive API request failed after retries were exhausted"
+    ):
+        provider.load_rows()
+
+    assert service.execute_calls == 3
+    assert sleep_calls == [1.0, 2.0]
+
+
+def test_xlsx_drive_load_rows_wraps_timeout_after_retries_are_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("app.retry.time.sleep", sleep_calls.append)
+    service = _FakeDriveService(
+        _build_workbook_bytes(
+            ["Name", "Email", "Birthday"],
+            ["Test Person", "test.person@example.com", "2000-01-02"],
+        ),
+        execute_side_effects=[
+            TimeoutError("synthetic timeout"),
+            TimeoutError("synthetic timeout"),
+            TimeoutError("synthetic timeout"),
+        ],
+    )
+    provider = XlsxDriveProvider(
+        config=_build_config(),
+        service_factory=lambda: service,
+    )
+
+    with pytest.raises(
+        SpreadsheetError, match="Drive API request failed after retries were exhausted"
+    ):
+        provider.load_rows()
+
+    assert service.execute_calls == 3
+    assert sleep_calls == [1.0, 2.0]
+
+
 class _FakeDriveService:
-    def __init__(self, workbook_bytes: bytes) -> None:
+    def __init__(
+        self,
+        workbook_bytes: bytes,
+        *,
+        execute_side_effects: list[Exception] | None = None,
+    ) -> None:
         self._workbook_bytes = workbook_bytes
+        self.execute_side_effects = list(execute_side_effects or [])
+        self.execute_calls = 0
 
     def files(self) -> _FakeDriveService:
         return self
 
     def get_media(self, fileId: str) -> _FakeDriveRequest:
         assert fileId == "test-drive-id"
-        return _FakeDriveRequest(self._workbook_bytes)
+        return _FakeDriveRequest(self)
 
 
 class _FakeDriveRequest:
-    def __init__(self, workbook_bytes: bytes) -> None:
-        self._workbook_bytes = workbook_bytes
+    def __init__(self, service: _FakeDriveService) -> None:
+        self._service = service
 
     def execute(self) -> bytes:
-        return self._workbook_bytes
+        self._service.execute_calls += 1
+        if self._service.execute_side_effects:
+            raise self._service.execute_side_effects.pop(0)
+        return self._service._workbook_bytes
 
 
 def _build_workbook_bytes(header_row: list[object], data_row: list[object]) -> bytes:

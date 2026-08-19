@@ -6,6 +6,7 @@ from typing import Any
 from zipfile import BadZipFile
 
 from googleapiclient.errors import HttpError  # type: ignore[import-untyped]
+from httplib2 import HttpLib2Error  # type: ignore[import-untyped]
 from openpyxl import load_workbook  # type: ignore[import-untyped]
 from openpyxl.utils.exceptions import (  # type: ignore[import-untyped]
     InvalidFileException,
@@ -34,7 +35,16 @@ class XlsxDriveProvider(SpreadsheetProvider):
         self._service_factory = service_factory
 
     def load_rows(self) -> list[dict[str, object]]:
-        workbook_bytes = self._download_workbook_bytes_with_retry()
+        try:
+            workbook_bytes = self._download_workbook_bytes_with_retry()
+        except (
+            _RetryableSpreadsheetError,
+            TimeoutError,
+            ConnectionError,
+        ) as exc:
+            raise SpreadsheetError(
+                "Drive API request failed after retries were exhausted"
+            ) from exc
         try:
             workbook = load_workbook(workbook_bytes, data_only=True, read_only=True)
         except (
@@ -89,5 +99,9 @@ class XlsxDriveProvider(SpreadsheetProvider):
             if exc.resp.status in _TRANSIENT_HTTP_STATUSES:
                 raise _RetryableSpreadsheetError("Transient Drive API failure") from exc
             raise SpreadsheetError("Drive API request failed") from exc
+        except HttpLib2Error as exc:
+            raise _RetryableSpreadsheetError(
+                "Transient Drive transport failure"
+            ) from exc
         workbook_buffer.seek(0)
         return workbook_buffer

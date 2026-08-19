@@ -4,11 +4,15 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from httplib2 import HttpLib2Error  # type: ignore[import-untyped]
 
 from app.birthday_rules import parse_birthday
 from app.config import Config
 from app.spreadsheet.base import SpreadsheetError
-from app.spreadsheet.google_sheets import GoogleSheetsProvider, _build_sheet_range
+from app.spreadsheet.google_sheets import (
+    GoogleSheetsProvider,
+    _build_sheet_range,
+)
 
 
 def test_google_sheets_load_rows_maps_headers_with_normalization() -> None:
@@ -148,9 +152,97 @@ def test_build_sheet_range_escapes_apostrophes_in_tab_name() -> None:
     assert _build_sheet_range(config) == "'People''s Birthdays'!A:ZZ"
 
 
+def test_google_sheets_load_rows_retries_transport_error_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("app.retry.time.sleep", sleep_calls.append)
+    service = _FakeSheetsService(
+        [["Name", "Email", "Birthday"], ["Test Person", "test.person@example.com", 1]],
+        execute_side_effects=[HttpLib2Error("synthetic transport failure")],
+    )
+    provider = GoogleSheetsProvider(
+        config=_build_config(),
+        service_factory=lambda: service,
+    )
+
+    rows = provider.load_rows()
+
+    assert rows == [
+        {
+            "Name": "Test Person",
+            "Email": "test.person@example.com",
+            "Birthday": 1,
+        }
+    ]
+    assert service.execute_calls == 2
+    assert sleep_calls == [1.0]
+
+
+def test_google_sheets_load_rows_retries_transport_error_until_attempts_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("app.retry.time.sleep", sleep_calls.append)
+    service = _FakeSheetsService(
+        [["Name", "Email", "Birthday"], ["Test Person", "test.person@example.com", 1]],
+        execute_side_effects=[
+            HttpLib2Error("synthetic transport failure"),
+            HttpLib2Error("synthetic transport failure"),
+            HttpLib2Error("synthetic transport failure"),
+        ],
+    )
+    provider = GoogleSheetsProvider(
+        config=_build_config(),
+        service_factory=lambda: service,
+    )
+
+    with pytest.raises(
+        SpreadsheetError, match="Sheets API request failed after retries were exhausted"
+    ):
+        provider.load_rows()
+
+    assert service.execute_calls == 3
+    assert sleep_calls == [1.0, 2.0]
+
+
+def test_google_sheets_load_rows_wraps_timeout_after_retries_are_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("app.retry.time.sleep", sleep_calls.append)
+    service = _FakeSheetsService(
+        [["Name", "Email", "Birthday"], ["Test Person", "test.person@example.com", 1]],
+        execute_side_effects=[
+            TimeoutError("synthetic timeout"),
+            TimeoutError("synthetic timeout"),
+            TimeoutError("synthetic timeout"),
+        ],
+    )
+    provider = GoogleSheetsProvider(
+        config=_build_config(),
+        service_factory=lambda: service,
+    )
+
+    with pytest.raises(
+        SpreadsheetError, match="Sheets API request failed after retries were exhausted"
+    ):
+        provider.load_rows()
+
+    assert service.execute_calls == 3
+    assert sleep_calls == [1.0, 2.0]
+
+
 class _FakeSheetsService:
-    def __init__(self, values: list[list[object]]) -> None:
+    def __init__(
+        self,
+        values: list[list[object]],
+        *,
+        execute_side_effects: list[Exception] | None = None,
+    ) -> None:
         self._values = values
+        self.execute_side_effects = list(execute_side_effects or [])
+        self.execute_calls = 0
         self.last_get_kwargs: dict[str, object] | None = None
 
     def spreadsheets(self) -> _FakeSheetsService:
@@ -163,15 +255,18 @@ class _FakeSheetsService:
         self.last_get_kwargs = kwargs
         assert kwargs["spreadsheetId"] == "test-sheet-id"
         assert kwargs["range"] == "Birthdays!A:ZZ"
-        return _FakeSheetsRequest(self._values)
+        return _FakeSheetsRequest(self)
 
 
 class _FakeSheetsRequest:
-    def __init__(self, values: list[list[object]]) -> None:
-        self._values = values
+    def __init__(self, service: _FakeSheetsService) -> None:
+        self._service = service
 
     def execute(self) -> dict[str, list[list[object]]]:
-        return {"values": self._values}
+        self._service.execute_calls += 1
+        if self._service.execute_side_effects:
+            raise self._service.execute_side_effects.pop(0)
+        return {"values": self._service._values}
 
 
 def _build_config(*, google_sheet_tab: str = "Birthdays") -> Config:
