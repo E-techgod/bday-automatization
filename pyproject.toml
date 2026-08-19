@@ -34,3 +34,5 @@ warn_unused_configs = true
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+timeout = 10
+timeout_method = "signal"
