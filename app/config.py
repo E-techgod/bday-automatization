@@ -41,6 +41,9 @@ EmailProvider = Literal["gmail"]
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _TEST_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_BIRTHDAY_IMAGE_PATH = _PROJECT_ROOT / "app/assets/birthday_banner.jpg"
+_DEFAULT_STATE_DB_PATH = _PROJECT_ROOT / "data/birthday_state.db"
 
 
 class ConfigError(ValueError):
@@ -79,7 +82,7 @@ class Config:
 
 
 def load_config() -> Config:
-    load_dotenv()
+    load_dotenv(dotenv_path=_PROJECT_ROOT / ".env")
 
     spreadsheet_mode = _parse_spreadsheet_mode(
         _get_env("SPREADSHEET_MODE", "google_sheet")
@@ -93,10 +96,8 @@ def load_config() -> Config:
         "GOOGLE_CREDENTIALS_FILE",
         _get_env("GOOGLE_CREDENTIALS_FILE"),
     )
-    birthday_image_mode = _parse_image_mode(_get_env("BIRTHDAY_IMAGE_MODE", "none"))
-    birthday_image_path = Path(
-        _get_env("BIRTHDAY_IMAGE_PATH", "app/assets/birthday_banner.png")
-    )
+    birthday_image_mode = _parse_image_mode(_get_env("BIRTHDAY_IMAGE_MODE", "local"))
+    birthday_image_path = _load_birthday_image_path()
     birthday_image_url = _get_env("BIRTHDAY_IMAGE_URL", "")
     birthday_image_width = _parse_positive_int(
         "BIRTHDAY_IMAGE_WIDTH",
@@ -144,7 +145,7 @@ def load_config() -> Config:
         birthday_image_url=birthday_image_url,
         birthday_image_alt=_get_env("BIRTHDAY_IMAGE_ALT", "Happy Birthday"),
         birthday_image_width=birthday_image_width,
-        state_db_path=Path(_get_env("STATE_DB_PATH", "data/birthday_state.db")),
+        state_db_path=_load_state_db_path(),
         stale_claim_timeout_minutes=_parse_positive_int(
             "STALE_CLAIM_TIMEOUT_MINUTES",
             _get_env("STALE_CLAIM_TIMEOUT_MINUTES", "30"),
@@ -166,6 +167,20 @@ def _get_env(name: str, default: str | None = None) -> str:
     if value is None:
         raise ConfigError(f"{name} is required")
     return value
+
+
+def _load_birthday_image_path() -> Path:
+    configured_path = os.environ.get("BIRTHDAY_IMAGE_PATH")
+    if configured_path is None:
+        return _DEFAULT_BIRTHDAY_IMAGE_PATH
+    return _resolve_project_relative_path(configured_path)
+
+
+def _load_state_db_path() -> Path:
+    configured_path = os.environ.get("STATE_DB_PATH")
+    if configured_path is None:
+        return _DEFAULT_STATE_DB_PATH
+    return _resolve_project_relative_path(configured_path)
 
 
 def _parse_bool(name: str, value: str) -> bool:
@@ -241,10 +256,17 @@ def _parse_timezone(value: str) -> str:
 
 
 def _parse_existing_path(name: str, value: str) -> Path:
-    path = Path(value)
+    path = _resolve_project_relative_path(value)
     if not path.is_file():
         raise ConfigError(f"{name} must point to an existing file")
     return path
+
+
+def _resolve_project_relative_path(value: str) -> Path:
+    path = Path(value)
+    if path.is_absolute():
+        return path
+    return _PROJECT_ROOT / path
 
 
 def _parse_positive_int(name: str, value: str) -> int:

@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from app.config import ConfigError, load_config
+import app.config as config_module
+from app.config import (
+    _DEFAULT_BIRTHDAY_IMAGE_PATH,
+    _DEFAULT_STATE_DB_PATH,
+    ConfigError,
+    load_config,
+)
 
 
 def test_load_config_valid_google_sheet_mode(
@@ -128,19 +134,18 @@ def test_load_config_missing_local_birthday_image_raises(
         load_config()
 
 
-def test_load_config_without_birthday_image_mode_env_uses_none_default(
+def test_load_config_without_birthday_image_mode_env_uses_local_default(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    _, credentials_path = _create_files(tmp_path)
-    missing_image_path = tmp_path / "missing.png"
-    _set_base_env(monkeypatch, missing_image_path, credentials_path)
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
     monkeypatch.delenv("BIRTHDAY_IMAGE_MODE", raising=False)
 
     config = load_config()
 
-    assert config.birthday_image_mode == "none"
-    assert config.birthday_image_path == missing_image_path
+    assert config.birthday_image_mode == "local"
+    assert config.birthday_image_path == image_path
 
 
 def test_load_config_invalid_email_provider_raises(
@@ -253,9 +258,223 @@ def test_load_config_succeeds_with_real_env_example_defaults(
 
     config = load_config()
 
-    assert config.birthday_image_mode == "none"
-    assert config.birthday_image_path == Path("app/assets/birthday_banner.png")
+    assert config.birthday_image_mode == "local"
+    assert config.birthday_image_path == _DEFAULT_BIRTHDAY_IMAGE_PATH
+    assert config.birthday_image_path.is_file()
     assert config.email_provider == "gmail"
+
+
+def test_load_config_default_birthday_image_path_is_independent_of_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    credentials_path = tmp_path / "credentials.json"
+    credentials_path.write_text("{}", encoding="utf-8")
+
+    for key in _parse_env_example():
+        monkeypatch.delenv(key, raising=False)
+
+    env_vars = _parse_env_example()
+    env_vars.update(
+        {
+            "GOOGLE_SHEET_ID": "sheet-123",
+            "EMAIL_FROM_ADDRESS": "sender@example.com",
+            "GOOGLE_CREDENTIALS_FILE": str(credentials_path),
+        }
+    )
+    env_vars.pop("BIRTHDAY_IMAGE_PATH", None)
+
+    for key, value in env_vars.items():
+        monkeypatch.setenv(key, value)
+
+    monkeypatch.chdir(tmp_path)
+
+    config = load_config()
+
+    assert config.birthday_image_mode == "local"
+    assert config.birthday_image_path == _DEFAULT_BIRTHDAY_IMAGE_PATH
+    assert config.birthday_image_path.is_file()
+
+
+def test_load_config_relative_birthday_image_path_is_independent_of_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    credentials_path = tmp_path / "credentials.json"
+    credentials_path.write_text("{}", encoding="utf-8")
+
+    for key in _parse_env_example():
+        monkeypatch.delenv(key, raising=False)
+
+    env_vars = _parse_env_example()
+    env_vars.update(
+        {
+            "GOOGLE_SHEET_ID": "sheet-123",
+            "EMAIL_FROM_ADDRESS": "sender@example.com",
+            "GOOGLE_CREDENTIALS_FILE": str(credentials_path),
+            "BIRTHDAY_IMAGE_PATH": "app/assets/birthday_banner.jpg",
+        }
+    )
+
+    for key, value in env_vars.items():
+        monkeypatch.setenv(key, value)
+
+    monkeypatch.chdir(tmp_path)
+
+    config = load_config()
+
+    assert config.birthday_image_mode == "local"
+    assert config.birthday_image_path == _DEFAULT_BIRTHDAY_IMAGE_PATH
+    assert config.birthday_image_path.is_file()
+
+
+def test_load_config_default_state_db_path_is_independent_of_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    credentials_path = tmp_path / "credentials.json"
+    credentials_path.write_text("{}", encoding="utf-8")
+
+    for key in _parse_env_example():
+        monkeypatch.delenv(key, raising=False)
+
+    env_vars = _parse_env_example()
+    env_vars.update(
+        {
+            "GOOGLE_SHEET_ID": "sheet-123",
+            "EMAIL_FROM_ADDRESS": "sender@example.com",
+            "GOOGLE_CREDENTIALS_FILE": str(credentials_path),
+        }
+    )
+    env_vars.pop("STATE_DB_PATH", None)
+
+    for key, value in env_vars.items():
+        monkeypatch.setenv(key, value)
+
+    monkeypatch.chdir(tmp_path)
+
+    config = load_config()
+
+    assert config.state_db_path == _DEFAULT_STATE_DB_PATH
+    assert config.state_db_path.is_absolute()
+
+
+def test_load_config_relative_state_db_path_is_independent_of_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    credentials_path = tmp_path / "credentials.json"
+    credentials_path.write_text("{}", encoding="utf-8")
+
+    for key in _parse_env_example():
+        monkeypatch.delenv(key, raising=False)
+
+    env_vars = _parse_env_example()
+    env_vars.update(
+        {
+            "GOOGLE_SHEET_ID": "sheet-123",
+            "EMAIL_FROM_ADDRESS": "sender@example.com",
+            "GOOGLE_CREDENTIALS_FILE": str(credentials_path),
+            "STATE_DB_PATH": "data/birthday_state.db",
+        }
+    )
+
+    for key, value in env_vars.items():
+        monkeypatch.setenv(key, value)
+
+    monkeypatch.chdir(tmp_path)
+
+    config = load_config()
+
+    assert config.state_db_path == _DEFAULT_STATE_DB_PATH
+    assert config.state_db_path.is_absolute()
+
+
+def test_load_config_relative_google_credentials_file_is_independent_of_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    project_root = tmp_path / "project"
+    credentials_path = project_root / "config/google-credentials.json"
+    credentials_path.parent.mkdir(parents=True, exist_ok=True)
+    credentials_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(config_module, "_PROJECT_ROOT", project_root)
+
+    for key in _parse_env_example():
+        monkeypatch.delenv(key, raising=False)
+
+    env_vars = _parse_env_example()
+    env_vars.update(
+        {
+            "GOOGLE_SHEET_ID": "sheet-123",
+            "EMAIL_FROM_ADDRESS": "sender@example.com",
+            "GOOGLE_CREDENTIALS_FILE": "config/google-credentials.json",
+            "BIRTHDAY_IMAGE_MODE": "none",
+        }
+    )
+
+    for key, value in env_vars.items():
+        monkeypatch.setenv(key, value)
+
+    monkeypatch.chdir(tmp_path)
+
+    config = load_config()
+
+    assert config.google_credentials_file == credentials_path
+    assert config.google_credentials_file.is_file()
+
+
+def test_load_config_absolute_google_credentials_file_is_independent_of_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    credentials_path = tmp_path / "credentials.json"
+    credentials_path.write_text("{}", encoding="utf-8")
+
+    for key in _parse_env_example():
+        monkeypatch.delenv(key, raising=False)
+
+    env_vars = _parse_env_example()
+    env_vars.update(
+        {
+            "GOOGLE_SHEET_ID": "sheet-123",
+            "EMAIL_FROM_ADDRESS": "sender@example.com",
+            "GOOGLE_CREDENTIALS_FILE": str(credentials_path),
+        }
+    )
+
+    for key, value in env_vars.items():
+        monkeypatch.setenv(key, value)
+
+    other_cwd = tmp_path / "other-cwd"
+    other_cwd.mkdir()
+    monkeypatch.chdir(other_cwd)
+
+    config = load_config()
+
+    assert config.google_credentials_file == credentials_path
+    assert config.google_credentials_file.is_file()
+
+
+def test_load_config_passes_project_root_env_path_to_load_dotenv(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict[str, Path | None] = {"dotenv_path": None}
+
+    def fake_load_dotenv(*, dotenv_path: Path | None = None, **_kwargs: object) -> bool:
+        captured["dotenv_path"] = dotenv_path
+        return False
+
+    monkeypatch.setattr(config_module, "load_dotenv", fake_load_dotenv)
+
+    load_config()
+
+    assert captured["dotenv_path"] == config_module._PROJECT_ROOT / ".env"
 
 
 def _set_base_env(
@@ -297,8 +516,8 @@ def _set_base_env(
 
 
 def _create_files(tmp_path):
-    image_path = tmp_path / "birthday_banner.png"
-    image_path.write_bytes(b"png")
+    image_path = tmp_path / "birthday_banner.jpg"
+    image_path.write_bytes(b"jpg")
     credentials_path = tmp_path / "credentials.json"
     credentials_path.write_text("{}", encoding="utf-8")
     return image_path, credentials_path

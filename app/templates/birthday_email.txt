@@ -1,0 +1,10 @@
+Happy Birthday, {{ name }}! 🎉
+
+Hi {{ name }},
+
+{% if image_mode == "url" %}{{ image_url }}
+
+{% endif %}Wishing you a wonderful birthday filled with joy, laughter, and a year ahead full of great moments.
+
+Best wishes,
+{{ from_name }}

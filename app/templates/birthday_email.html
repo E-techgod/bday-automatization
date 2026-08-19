@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+  <body>
+    <h1>Happy Birthday, {{ name }}! 🎉</h1>
+    <p>Hi {{ name }},</p>
+    {% if image_mode == "local" %}
+    <p>
+      <img src="cid:birthday_banner" alt="{{ image_alt }}" width="{{ image_width }}">
+    </p>
+    {% elif image_mode == "url" %}
+    <p>
+      <img src="{{ image_url }}" alt="{{ image_alt }}" width="{{ image_width }}">
+    </p>
+    {% endif %}
+    <p>Wishing you a wonderful birthday filled with joy, laughter, and a year ahead full of great moments.</p>
+    <p>Best wishes,<br>{{ from_name }}</p>
+  </body>
+</html>

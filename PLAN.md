@@ -41,7 +41,7 @@ triggers a fresh process each day.
 | `app/templates/birthday_email.html` / `.txt` | Jinja2 templates, logic-free application code. |
 | `app/retry.py` | Small `@retry_with_backoff` decorator for transient Google/Gmail API errors. |
 | `app/birthday_rules.py` | Pure date-matching logic incl. Feb 29 rule; unit-tested in isolation. |
-| `app/assets/birthday_banner.png` | Default placeholder birthday banner image. |
+| `app/assets/birthday_banner.jpg` | Default placeholder birthday banner image. |
 | `run.py` | Thin entrypoint calling `app.main.main()`. |
 
 ## 3. Dependencies (`pyproject.toml`)
@@ -74,7 +74,7 @@ app/spreadsheet/{__init__.py,base.py,google_sheets.py,xlsx_drive.py}
 app/email/{__init__.py,base.py,gmail.py}
 app/state/{__init__.py,sqlite.py}
 app/templates/{birthday_email.html,birthday_email.txt}
-app/assets/birthday_banner.png
+app/assets/birthday_banner.jpg
 tests/  (mirrors app/ layout: test_config.py, test_birthday_rules.py, test_birthday_service.py,
           test_spreadsheet_google_sheets.py, test_spreadsheet_xlsx_drive.py, test_state_sqlite.py,
           test_email_gmail.py, test_templates.py)
@@ -125,8 +125,8 @@ EMAIL_SUBJECT_TEMPLATE=Happy Birthday, {{name}}! 🎉
 GOOGLE_CREDENTIALS_FILE=
 GOOGLE_IMPERSONATE_SUBJECT=            # defaults to EMAIL_FROM_ADDRESS if blank
 
-BIRTHDAY_IMAGE_MODE=none               # none | local | url — see note below
-BIRTHDAY_IMAGE_PATH=app/assets/birthday_banner.png
+BIRTHDAY_IMAGE_MODE=local              # none | local | url — see note below
+BIRTHDAY_IMAGE_PATH=app/assets/birthday_banner.jpg
 BIRTHDAY_IMAGE_URL=
 BIRTHDAY_IMAGE_ALT=Happy Birthday
 BIRTHDAY_IMAGE_WIDTH=600
@@ -157,12 +157,11 @@ Validation rules:
   providers are fully mocked in tests — production always requires it).
 
 **Amendment (post-Milestone-1 review):** the code-level and `.env.example`
-default for `BIRTHDAY_IMAGE_MODE` is `none`, not `local`, for Milestones 1-4.
-`local` (with `app/assets/birthday_banner.png` present) becomes the shipped
-default starting in Milestone 5, once the real banner asset is committed —
-see §13. Shipping `local` as the default before the asset exists would make
-every fresh clone fail `load_config()`'s fail-fast local-image-path check,
-which is the opposite of this milestone's goal.
+default for `BIRTHDAY_IMAGE_MODE` was temporarily `none`, not `local`, for
+Milestones 1-4. Milestone 5 lands the real committed asset at
+`app/assets/birthday_banner.jpg` and flips the shipped default back to
+`local`, restoring the intended out-of-the-box behavior without tripping
+`load_config()`'s fail-fast local-image-path check.
 
 ## 6. Authentication Approach
 
@@ -365,9 +364,41 @@ class EmailProvider(ABC):
 `inline_image` is set, a `MIMEImage` with `Content-ID: <birthday_banner>`
 and `Content-Disposition: inline`. Base64/urlsafe-encode the raw RFC 2822
 message and call `users().messages().send(userId="me",
-body={"raw": ...})`. Wrap the API call in the retry decorator; on final
-failure raise `EmailSendError` (never let a raw googleapiclient exception
-escape past this module).
+body={"raw": ...})`. On any failure raise `EmailSendError` (never let a
+raw googleapiclient exception escape past this module).
+
+**Amendment (post-Milestone-5 review):** do NOT wrap the `messages.send`
+call itself in the transient-retry decorator, unlike the read-only Sheets
+and Drive calls. `send` is a non-idempotent write with no
+Gmail-API-provided idempotency key — if the request reaches Gmail and
+succeeds but the response is lost to a transport error, an automatic
+in-process retry would send a second, real duplicate email. Removing
+in-process retry closes that specific window, but does NOT by itself make
+cross-run reclaim (§9) safe for this same failure mode: a `failed` row is
+eligible for reclaim on a later run, and if the original failure was
+"ambiguous" (the request may have actually reached Gmail and succeeded
+before the response was lost), that later reclaim can still send a real
+duplicate — just spread across runs instead of within one process.
+
+A full fix (checking Gmail's Sent mail for a deterministic Message-ID
+before reclaiming) would require a broader OAuth scope than `gmail.send`
+and meaningful new reconciliation logic — disproportionate engineering
+for this project. The proportionate mitigation instead: `GmailProvider`
+distinguishes *pre-dispatch* failures (message construction, anything
+before `.execute()` is called — definitely not sent, always safe to
+retry) from *post-dispatch* failures (the `.execute()` call itself
+raised — outcome unknown, Gmail may have already accepted it) by raising
+a dedicated `AmbiguousSendError(EmailSendError)` for the latter case.
+**Milestone 6 requirement:** when `birthday_service` catches
+`AmbiguousSendError`, it must still call `mark_failed()` (never silently
+drop the row — it must remain visible), but must also log a distinct,
+prominent warning (e.g. `CRITICAL`/`ERROR`, not the routine failure log
+level) naming the client and stating the send outcome is unknown and a
+future reclaim could double-send, so an operator can manually verify via
+the Sent folder before the row is naturally reclaimed on a later run.
+This does not eliminate the residual risk, but makes it visible and rare
+(it requires a successful request whose specific response is then lost)
+rather than silent.
 
 Subject default: `Happy Birthday, {{name}}! 🎉` rendered via
 `EMAIL_SUBJECT_TEMPLATE` (Jinja2), same templating engine as the body so
@@ -406,11 +437,8 @@ passes in: `name`, `image_mode`, `image_alt`, `image_width`, `image_url`.
   No `file://` URL ever touches the HTML.
 - `url`: no attachment; template embeds `BIRTHDAY_IMAGE_URL` directly, must
   be validated `https://` at config time.
-- Include a real placeholder `app/assets/birthday_banner.png` (simple
-  generated banner, e.g. drawn with Pillow at build time then committed as
-  a static asset — do not add Pillow as a runtime dependency; generate it
-  once via a small script/dev-only step and commit the PNG, or hand-craft
-  a minimal valid PNG) so `local` mode works out of the box.
+- Include a real placeholder `app/assets/birthday_banner.jpg` so `local`
+  mode works out of the box.
 
 ## 14. Retry Behavior (`app/retry.py`)
 
@@ -537,7 +565,7 @@ PASS.
 4. **SQLite idempotency state** — `app/state/sqlite.py` full claim
    protocol from §9. Tests: `test_state_sqlite.py` (cases 10, 11, 19).
 5. **Email layer** — `app/email/base.py` + `gmail.py`, templates,
-   image modes (§12–13), placeholder `birthday_banner.png`. Tests:
+   image modes (§12–13), placeholder `birthday_banner.jpg`. Tests:
    `test_email_gmail.py`, `test_templates.py` (cases 15,16,17).
 6. **Orchestration** — `app/birthday_service.py` wiring everything +
    `app/retry.py` + `app/main.py` + logging (§16) + dry-run (§15). Tests:
