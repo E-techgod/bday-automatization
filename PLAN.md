@@ -32,7 +32,7 @@ triggers a fresh process each day.
 | `app/config.py` | Parse & validate all env vars into a frozen `Config` dataclass. Fail fast with a clear error on invalid config. |
 | `app/models.py` | `Client`, `BirthdayMatch`, `SendResult` dataclasses. |
 | `app/birthday_service.py` | Orchestration: load rows → parse → match → claim → send → record. Pure-ish, takes injected collaborators (provider, state store, email provider, clock) for testability. |
-| `app/spreadsheet/base.py` | `SpreadsheetProvider` ABC: `load_rows() -> list[dict[str, str]]` plus header-resolution helper shared by both implementations. |
+| `app/spreadsheet/base.py` | `SpreadsheetProvider` ABC: `load_rows() -> list[dict[str, object]]` (see amendment in §7) plus header-resolution helper shared by both implementations. |
 | `app/spreadsheet/google_sheets.py` | Reads a Google Sheet via Sheets API v4 (`spreadsheets.values.get`). |
 | `app/spreadsheet/xlsx_drive.py` | Downloads an `.xlsx` from Drive (`files.get_media`/`export`) into memory, parses with `openpyxl`. |
 | `app/state/sqlite.py` | Idempotency store: `claim(email, month, day, year) -> ClaimResult`, `mark_sent(claim_id)`, `mark_failed(claim_id)`. |
@@ -194,7 +194,7 @@ interactive OAuth consent, no refresh-token storage/rotation to manage.
 
 ```python
 class SpreadsheetProvider(ABC):
-    def load_rows(self) -> list[dict[str, str]]: ...
+    def load_rows(self) -> list[dict[str, object]]: ...
 ```
 
 Shared helper `resolve_headers(raw_header_row, required_logical_names, config)`:
@@ -203,6 +203,18 @@ logical names (`NAME_COLUMN` etc., also normalized) to actual column
 indices. `LAST_SENT_YEAR_COLUMN` is optional (informational only — see §9,
 it is not the idempotency source of truth); the other three are required or
 `load_rows` raises `SpreadsheetError`.
+
+**Amendment (post-Milestone-3 review):** row-building must preserve each
+cell's native Python type (`str`, `date`, `datetime`, `int`, `float`) rather
+than stringifying every value. §8's `parse_birthday` explicitly accepts
+`date`/`datetime` passthrough and numeric Excel serials — stringifying a
+birthday cell first (e.g. an Excel serial `36526` becoming the string
+`"36526"`, or a native `datetime` becoming `"2000-01-01 00:00:00"`) breaks
+that parser's contract and turns valid `.xlsx`/Sheets birthday values into
+false "invalid row" skips. `build_row_dict`'s original signature
+(`-> dict[str, str]`) was wrong for this reason; it is corrected to
+`-> dict[str, object]`, only `.strip()`-ing values that are already `str`
+and passing every other type through unchanged.
 
 - `google_sheets.py`: build `googleapiclient.discovery.build("sheets","v4",...)`,
   call `spreadsheets().values().get(spreadsheetId=..., range=f"{tab}!A:Z")`

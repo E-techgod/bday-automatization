@@ -1,0 +1,96 @@
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+
+from app.config import Config
+
+
+class SpreadsheetError(ValueError):
+    """Raised when spreadsheet data cannot be loaded or mapped safely."""
+
+
+class SpreadsheetProvider(ABC):
+    @abstractmethod
+    def load_rows(self) -> list[dict[str, object]]:
+        """Load spreadsheet rows keyed by the configured column names."""
+
+
+def resolve_headers(raw_header_row: list[str], config: Config) -> dict[str, int]:
+    _validate_distinct_configured_headers(config)
+
+    normalized_headers: dict[str, int] = {}
+    raw_headers_by_normalized: dict[str, list[str]] = {}
+    for index, cell in enumerate(raw_header_row):
+        normalized = _normalize_header(cell)
+        if not normalized:
+            continue
+        raw_headers = raw_headers_by_normalized.setdefault(normalized, [])
+        raw_headers.append(cell)
+        if len(raw_headers) > 1:
+            duplicates = ", ".join(repr(value) for value in raw_headers)
+            raise SpreadsheetError(
+                f"Duplicate spreadsheet headers after normalization: {duplicates}"
+            )
+        normalized_headers[normalized] = index
+
+    resolved = {
+        config.name_column: _require_header(config.name_column, normalized_headers),
+        config.email_column: _require_header(config.email_column, normalized_headers),
+        config.birthday_column: _require_header(
+            config.birthday_column, normalized_headers
+        ),
+    }
+
+    optional_index = normalized_headers.get(
+        _normalize_header(config.last_sent_year_column)
+    )
+    if optional_index is not None:
+        resolved[config.last_sent_year_column] = optional_index
+
+    return resolved
+
+
+def build_row_dict(
+    raw_row: list[object], resolved_headers: dict[str, int]
+) -> dict[str, object]:
+    row: dict[str, object] = {}
+    for logical_name, column_index in resolved_headers.items():
+        if column_index >= len(raw_row):
+            continue
+        value = raw_row[column_index]
+        if value is None:
+            continue
+        row[logical_name] = value.strip() if isinstance(value, str) else value
+    return row
+
+
+def _require_header(logical_name: str, normalized_headers: dict[str, int]) -> int:
+    header_index = normalized_headers.get(_normalize_header(logical_name))
+    if header_index is None:
+        raise SpreadsheetError(f"Missing required spreadsheet header: {logical_name}")
+    return header_index
+
+
+def _validate_distinct_configured_headers(config: Config) -> None:
+    configured_headers = [
+        config.name_column,
+        config.email_column,
+        config.birthday_column,
+    ]
+    if _normalize_header(config.last_sent_year_column):
+        configured_headers.append(config.last_sent_year_column)
+
+    seen_by_normalized: dict[str, str] = {}
+    for configured_header in configured_headers:
+        normalized = _normalize_header(configured_header)
+        existing = seen_by_normalized.get(normalized)
+        if existing is not None:
+            raise SpreadsheetError(
+                "Configured spreadsheet columns collide after normalization: "
+                f"{existing!r} and {configured_header!r}"
+            )
+        seen_by_normalized[normalized] = configured_header
+
+
+def _normalize_header(value: str) -> str:
+    return value.strip().casefold()
