@@ -1,0 +1,302 @@
+from __future__ import annotations
+
+import os
+import re
+from dataclasses import dataclass
+from datetime import date
+from pathlib import Path
+from typing import IO, Literal
+from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
+
+try:
+    from dotenv import load_dotenv
+except ImportError:
+
+    def load_dotenv(
+        dotenv_path: str | os.PathLike[str] | None = None,
+        stream: IO[str] | None = None,
+        verbose: bool = False,
+        override: bool = False,
+        interpolate: bool = True,
+        encoding: str | None = "utf-8",
+    ) -> bool:
+        del stream, verbose, override, interpolate
+        env_path = Path(dotenv_path) if dotenv_path is not None else Path(".env")
+        if not env_path.is_file():
+            return False
+
+        for raw_line in env_path.read_text(encoding=encoding or "utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip())
+        return True
+
+
+SpreadsheetMode = Literal["google_sheet", "xlsx_drive"]
+BirthdayImageMode = Literal["none", "local", "url"]
+EmailProvider = Literal["gmail"]
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_TEST_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+class ConfigError(ValueError):
+    """Raised when environment configuration is invalid."""
+
+
+@dataclass(frozen=True)
+class Config:
+    app_timezone: str
+    dry_run: bool
+    test_date: date | None
+    spreadsheet_mode: SpreadsheetMode
+    google_sheet_id: str
+    google_sheet_tab: str
+    google_drive_file_id: str
+    name_column: str
+    email_column: str
+    birthday_column: str
+    last_sent_year_column: str
+    email_provider: str
+    email_from_name: str
+    email_from_address: str
+    email_subject_template: str
+    google_credentials_file: Path
+    google_impersonate_subject: str
+    birthday_image_mode: BirthdayImageMode
+    birthday_image_path: Path
+    birthday_image_url: str
+    birthday_image_alt: str
+    birthday_image_width: int
+    state_db_path: Path
+    stale_claim_timeout_minutes: int
+    retry_max_attempts: int
+    retry_base_delay_seconds: float
+    log_level: str
+
+
+def load_config() -> Config:
+    load_dotenv()
+
+    spreadsheet_mode = _parse_spreadsheet_mode(
+        _get_env("SPREADSHEET_MODE", "google_sheet")
+    )
+    app_timezone = _parse_timezone(_get_env("APP_TIMEZONE", "America/Chicago"))
+    dry_run = _parse_bool("DRY_RUN", _get_env("DRY_RUN", "true"))
+    test_date = _parse_test_date(_get_env("TEST_DATE", ""))
+    email_provider = _parse_email_provider(_get_env("EMAIL_PROVIDER", "gmail"))
+    email_from_address = _parse_email(_get_env("EMAIL_FROM_ADDRESS"))
+    google_credentials_file = _parse_existing_path(
+        "GOOGLE_CREDENTIALS_FILE",
+        _get_env("GOOGLE_CREDENTIALS_FILE"),
+    )
+    birthday_image_mode = _parse_image_mode(_get_env("BIRTHDAY_IMAGE_MODE", "none"))
+    birthday_image_path = Path(
+        _get_env("BIRTHDAY_IMAGE_PATH", "app/assets/birthday_banner.png")
+    )
+    birthday_image_url = _get_env("BIRTHDAY_IMAGE_URL", "")
+    birthday_image_width = _parse_positive_int(
+        "BIRTHDAY_IMAGE_WIDTH",
+        _get_env("BIRTHDAY_IMAGE_WIDTH", "600"),
+    )
+
+    google_sheet_id = _get_env("GOOGLE_SHEET_ID", "")
+    google_drive_file_id = _get_env("GOOGLE_DRIVE_FILE_ID", "")
+    _validate_spreadsheet_requirements(
+        spreadsheet_mode, google_sheet_id, google_drive_file_id
+    )
+    _validate_image_settings(
+        birthday_image_mode, birthday_image_path, birthday_image_url
+    )
+
+    google_impersonate_subject = _parse_google_impersonate_subject(
+        _get_env("GOOGLE_IMPERSONATE_SUBJECT", ""),
+        email_from_address,
+    )
+
+    return Config(
+        app_timezone=app_timezone,
+        dry_run=dry_run,
+        test_date=test_date,
+        spreadsheet_mode=spreadsheet_mode,
+        google_sheet_id=google_sheet_id,
+        google_sheet_tab=_get_env("GOOGLE_SHEET_TAB", ""),
+        google_drive_file_id=google_drive_file_id,
+        name_column=_get_env("NAME_COLUMN", "Name"),
+        email_column=_get_env("EMAIL_COLUMN", "Email"),
+        birthday_column=_get_env("BIRTHDAY_COLUMN", "Birthday"),
+        last_sent_year_column=_get_env(
+            "LAST_SENT_YEAR_COLUMN", "Last Birthday Email Year"
+        ),
+        email_provider=email_provider,
+        email_from_name=_get_env("EMAIL_FROM_NAME", ""),
+        email_from_address=email_from_address,
+        email_subject_template=_get_env(
+            "EMAIL_SUBJECT_TEMPLATE", "Happy Birthday, {{name}}! 🎉"
+        ),
+        google_credentials_file=google_credentials_file,
+        google_impersonate_subject=google_impersonate_subject,
+        birthday_image_mode=birthday_image_mode,
+        birthday_image_path=birthday_image_path,
+        birthday_image_url=birthday_image_url,
+        birthday_image_alt=_get_env("BIRTHDAY_IMAGE_ALT", "Happy Birthday"),
+        birthday_image_width=birthday_image_width,
+        state_db_path=Path(_get_env("STATE_DB_PATH", "data/birthday_state.db")),
+        stale_claim_timeout_minutes=_parse_positive_int(
+            "STALE_CLAIM_TIMEOUT_MINUTES",
+            _get_env("STALE_CLAIM_TIMEOUT_MINUTES", "30"),
+        ),
+        retry_max_attempts=_parse_positive_int(
+            "RETRY_MAX_ATTEMPTS",
+            _get_env("RETRY_MAX_ATTEMPTS", "3"),
+        ),
+        retry_base_delay_seconds=_parse_positive_float(
+            "RETRY_BASE_DELAY_SECONDS",
+            _get_env("RETRY_BASE_DELAY_SECONDS", "1.0"),
+        ),
+        log_level=_get_env("LOG_LEVEL", "INFO"),
+    )
+
+
+def _get_env(name: str, default: str | None = None) -> str:
+    value = os.environ.get(name, default)
+    if value is None:
+        raise ConfigError(f"{name} is required")
+    return value
+
+
+def _parse_bool(name: str, value: str) -> bool:
+    normalized = value.strip().casefold()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    raise ConfigError(f"{name} must be 'true' or 'false'")
+
+
+def _parse_test_date(value: str) -> date | None:
+    if not value.strip():
+        return None
+    if not _TEST_DATE_RE.fullmatch(value):
+        raise ConfigError("TEST_DATE must be in YYYY-MM-DD format")
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise ConfigError("TEST_DATE must be in YYYY-MM-DD format") from exc
+
+
+def _parse_spreadsheet_mode(value: str) -> SpreadsheetMode:
+    if value == "google_sheet":
+        return "google_sheet"
+    if value == "xlsx_drive":
+        return "xlsx_drive"
+    raise ConfigError("SPREADSHEET_MODE must be 'google_sheet' or 'xlsx_drive'")
+
+
+def _parse_image_mode(value: str) -> BirthdayImageMode:
+    if value == "none":
+        return "none"
+    if value == "local":
+        return "local"
+    if value == "url":
+        return "url"
+    raise ConfigError("BIRTHDAY_IMAGE_MODE must be 'none', 'local', or 'url'")
+
+
+def _parse_email_provider(value: str) -> EmailProvider:
+    normalized = value.strip().casefold()
+    if normalized == "gmail":
+        return "gmail"
+    raise ConfigError("EMAIL_PROVIDER must be 'gmail'")
+
+
+def _parse_email(value: str) -> str:
+    return _parse_email_value("EMAIL_FROM_ADDRESS", value)
+
+
+def _parse_email_value(name: str, value: str) -> str:
+    if not _EMAIL_RE.match(value):
+        raise ConfigError(f"{name} must be a valid email address")
+    return value
+
+
+def _parse_google_impersonate_subject(value: str, email_from_address: str) -> str:
+    stripped_value = value.strip()
+    if not stripped_value:
+        return email_from_address
+    return _parse_email_value("GOOGLE_IMPERSONATE_SUBJECT", stripped_value)
+
+
+def _parse_timezone(value: str) -> str:
+    try:
+        ZoneInfo(value)
+    except Exception as exc:
+        raise ConfigError(
+            f"APP_TIMEZONE is not a valid IANA timezone: {value!r}"
+        ) from exc
+    return value
+
+
+def _parse_existing_path(name: str, value: str) -> Path:
+    path = Path(value)
+    if not path.is_file():
+        raise ConfigError(f"{name} must point to an existing file")
+    return path
+
+
+def _parse_positive_int(name: str, value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ConfigError(f"{name} must be a positive integer") from exc
+    if parsed <= 0:
+        raise ConfigError(f"{name} must be a positive integer")
+    return parsed
+
+
+def _parse_positive_float(name: str, value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise ConfigError(f"{name} must be a positive number") from exc
+    if parsed <= 0:
+        raise ConfigError(f"{name} must be a positive number")
+    return parsed
+
+
+def _validate_spreadsheet_requirements(
+    spreadsheet_mode: SpreadsheetMode,
+    google_sheet_id: str,
+    google_drive_file_id: str,
+) -> None:
+    if spreadsheet_mode == "google_sheet" and not google_sheet_id.strip():
+        raise ConfigError(
+            "GOOGLE_SHEET_ID is required when SPREADSHEET_MODE=google_sheet"
+        )
+    if spreadsheet_mode == "xlsx_drive" and not google_drive_file_id.strip():
+        raise ConfigError(
+            "GOOGLE_DRIVE_FILE_ID is required when SPREADSHEET_MODE=xlsx_drive"
+        )
+
+
+def _validate_image_settings(
+    image_mode: BirthdayImageMode,
+    image_path: Path,
+    image_url: str,
+) -> None:
+    if image_mode == "none":
+        return
+    if image_mode == "local":
+        if not image_path.is_file():
+            raise ConfigError(
+                "BIRTHDAY_IMAGE_PATH must point to an existing file when BIRTHDAY_IMAGE_MODE=local"
+            )
+        return
+    parsed = urlparse(image_url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise ConfigError(
+            "BIRTHDAY_IMAGE_URL must be an https:// URL when BIRTHDAY_IMAGE_MODE=url"
+        )
