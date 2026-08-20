@@ -19,3 +19,5 @@ __pycache__/
 .coverage
 secrets/
 .env
+.DS_Store
+graphify-out/
