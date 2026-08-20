@@ -53,6 +53,83 @@ def test_birthday_today_claims_and_sends(caplog: pytest.LogCaptureFixture) -> No
     assert "birthday email sent to test.person@example.com" in caplog.text
 
 
+def test_birthday_email_uses_full_display_name_when_last_name_present() -> None:
+    provider = FakeSpreadsheetProvider(
+        rows=[
+            _row(
+                name="Test",
+                last_name="Person",
+                email="test.person@example.com",
+                birthday="1/1/2000",
+            )
+        ]
+    )
+    email_provider = FakeEmailProvider()
+
+    run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=provider,
+        state_store=FakeStateStore(),
+        email_provider=email_provider,
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    sent_message = email_provider.sent_messages[0]
+    assert sent_message.to_name == "Test Person"
+    assert "Test Person" in sent_message.subject
+    assert "Test Person" in sent_message.html_body
+    assert "Test Person" in sent_message.text_body
+
+
+def test_birthday_email_uses_first_name_only_when_last_name_missing() -> None:
+    provider = FakeSpreadsheetProvider(
+        rows=[
+            _row(
+                name="Test",
+                email="test.person@example.com",
+                birthday="1/1/2000",
+            )
+        ]
+    )
+    email_provider = FakeEmailProvider()
+
+    run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=provider,
+        state_store=FakeStateStore(),
+        email_provider=email_provider,
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    sent_message = email_provider.sent_messages[0]
+    assert sent_message.to_name == "Test"
+    assert "Test Person" not in sent_message.subject
+
+
+def test_birthday_email_normalizes_whitespace_in_display_name() -> None:
+    provider = FakeSpreadsheetProvider(
+        rows=[
+            _row(
+                name="  Test  ",
+                last_name="  Person  ",
+                email="test.person@example.com",
+                birthday="1/1/2000",
+            )
+        ]
+    )
+    email_provider = FakeEmailProvider()
+
+    run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=provider,
+        state_store=FakeStateStore(),
+        email_provider=email_provider,
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert email_provider.sent_messages[0].to_name == "Test Person"
+
+
 def test_no_birthday_today_has_clean_zero_send_summary() -> None:
     summary = run_birthday_job(
         _build_config(),
@@ -1348,6 +1425,7 @@ def _build_config(
         google_sheet_tab="Birthdays",
         google_drive_file_id="synthetic-drive-id",
         name_column="Name",
+        last_name_column="Last Name",
         email_column="Email",
         birthday_column="Birthday",
         last_sent_year_column="Last Birthday Email Year",
@@ -1373,12 +1451,21 @@ def _build_config(
     )
 
 
-def _row(*, name: str, email: str, birthday: object) -> dict[str, object]:
-    return {
+def _row(
+    *,
+    name: str,
+    email: str,
+    birthday: object,
+    last_name: object = None,
+) -> dict[str, object]:
+    row: dict[str, object] = {
         "Name": name,
         "Email": email,
         "Birthday": birthday,
     }
+    if last_name is not None:
+        row["Last Name"] = last_name
+    return row
 
 
 def _raise_config_error() -> Config:

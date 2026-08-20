@@ -262,6 +262,7 @@ def _parse_client_row(
         birthday=birthday,
         row_index=row_index,
         last_sent_year=_parse_last_sent_year(row.get(config.last_sent_year_column)),
+        last_name=_parse_name(row.get(config.last_name_column)),
     )
 
 
@@ -436,7 +437,7 @@ def _render_message(
     get_inline_image: Callable[[], InlineImage | None],
 ) -> EmailMessage:
     template_context = {
-        "name": client.name,
+        "name": client.display_name,
         "image_mode": config.birthday_image_mode,
         "image_alt": config.birthday_image_alt,
         "image_width": config.birthday_image_width,
@@ -446,11 +447,11 @@ def _render_message(
     html_body = html_env.get_template("birthday_email.html").render(template_context)
     text_body = html_env.get_template("birthday_email.txt").render(template_context)
     subject = subject_env.from_string(config.email_subject_template).render(
-        name=client.name
+        name=client.display_name
     )
     return EmailMessage(
         to_email=client.email,
-        to_name=client.name,
+        to_name=client.display_name,
         from_name=config.email_from_name,
         from_address=config.email_from_address,
         subject=subject,

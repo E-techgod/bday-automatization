@@ -154,6 +154,53 @@ def test_domain_models_store_expected_fields() -> None:
     assert send_result.error_message == "synthetic failure"
 
 
+def test_client_display_name_combines_first_and_last_name() -> None:
+    client = Client(
+        name="Test",
+        email="test.person@example.com",
+        birthday=date(2000, 1, 1),
+        row_index=7,
+        last_name="Person",
+    )
+
+    assert client.display_name == "Test Person"
+
+
+def test_client_display_name_falls_back_to_first_name_when_last_name_missing() -> None:
+    client = Client(
+        name="Test",
+        email="test.person@example.com",
+        birthday=date(2000, 1, 1),
+        row_index=7,
+        last_name=None,
+    )
+
+    assert client.display_name == "Test"
+
+
+@pytest.mark.parametrize(
+    ("name", "last_name", "expected"),
+    [
+        ("  Test  ", "  Person  ", "Test Person"),
+        ("Test\tPerson", None, "Test Person"),
+        ("Mary  Ann", "Van  Buren", "Mary Ann Van Buren"),
+        ("Test", "   ", "Test"),
+    ],
+)
+def test_client_display_name_normalizes_whitespace(
+    name: str, last_name: str | None, expected: str
+) -> None:
+    client = Client(
+        name=name,
+        email="test.person@example.com",
+        birthday=date(2000, 1, 1),
+        row_index=7,
+        last_name=last_name,
+    )
+
+    assert client.display_name == expected
+
+
 def _build_config(test_date: date | None) -> Config:
     return Config(
         app_timezone="America/Chicago",
@@ -164,6 +211,7 @@ def _build_config(test_date: date | None) -> Config:
         google_sheet_tab="SyntheticTab",
         google_drive_file_id="",
         name_column="Name",
+        last_name_column="Last Name",
         email_column="Email",
         birthday_column="Birthday",
         last_sent_year_column="Last Birthday Email Year",

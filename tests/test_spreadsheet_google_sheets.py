@@ -279,6 +279,7 @@ def _build_config(*, google_sheet_tab: str = "Birthdays") -> Config:
         google_sheet_tab=google_sheet_tab,
         google_drive_file_id="test-drive-id",
         name_column="Name",
+        last_name_column="Last Name",
         email_column="Email",
         birthday_column="Birthday",
         last_sent_year_column="Last Birthday Email Year",

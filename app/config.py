@@ -62,6 +62,7 @@ class Config:
     google_sheet_tab: str
     google_drive_file_id: str
     name_column: str
+    last_name_column: str
     email_column: str
     birthday_column: str
     last_sent_year_column: str
@@ -135,6 +136,7 @@ def load_config() -> Config:
         google_sheet_tab=_get_env("GOOGLE_SHEET_TAB", ""),
         google_drive_file_id=google_drive_file_id,
         name_column=_get_env("NAME_COLUMN", "Name"),
+        last_name_column=_get_env("LAST_NAME_COLUMN", "Last Name"),
         email_column=_get_env("EMAIL_COLUMN", "Email"),
         birthday_column=_get_env("BIRTHDAY_COLUMN", "Birthday"),
         last_sent_year_column=_get_env(

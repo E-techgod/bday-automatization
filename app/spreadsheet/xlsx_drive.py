@@ -76,8 +76,18 @@ class XlsxDriveProvider(SpreadsheetProvider):
 
             header_row = ["" if cell is None else str(cell) for cell in raw_header_row]
             resolved_headers = resolve_headers(header_row, self._config)
-            print("RAW HEADERS:", header_row)
-            print("RESOLVED HEADERS:", resolved_headers)
+            #print("RAW HEADERS:", header_row)
+            #print("RESOLVED HEADERS:", resolved_headers)
+            rows = [
+                build_row_dict(list(raw_row), resolved_headers)
+                for raw_row in row_iterator
+            ]
+
+            #print("FIRST 5 PARSED ROWS:")
+            for row in rows[:5]:
+                print(row)
+
+            return rows
             return [
                 build_row_dict(list(raw_row), resolved_headers)
                 for raw_row in row_iterator

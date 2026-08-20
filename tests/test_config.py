@@ -600,6 +600,7 @@ def _set_base_env(
         "GOOGLE_SHEET_TAB": "",
         "GOOGLE_DRIVE_FILE_ID": "drive-123",
         "NAME_COLUMN": "Name",
+        "LAST_NAME_COLUMN": "Last Name",
         "EMAIL_COLUMN": "Email",
         "BIRTHDAY_COLUMN": "Birthday",
         "LAST_SENT_YEAR_COLUMN": "Last Birthday Email Year",

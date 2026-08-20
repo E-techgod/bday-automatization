@@ -41,11 +41,17 @@ def resolve_headers(raw_header_row: list[str], config: Config) -> dict[str, int]
         ),
     }
 
-    optional_index = normalized_headers.get(
+    optional_last_sent_year_index = normalized_headers.get(
         _normalize_header(config.last_sent_year_column)
     )
-    if optional_index is not None:
-        resolved[config.last_sent_year_column] = optional_index
+    if optional_last_sent_year_index is not None:
+        resolved[config.last_sent_year_column] = optional_last_sent_year_index
+
+    optional_last_name_index = normalized_headers.get(
+        _normalize_header(config.last_name_column)
+    )
+    if optional_last_name_index is not None:
+        resolved[config.last_name_column] = optional_last_name_index
 
     return resolved
 
@@ -79,6 +85,8 @@ def _validate_distinct_configured_headers(config: Config) -> None:
     ]
     if _normalize_header(config.last_sent_year_column):
         configured_headers.append(config.last_sent_year_column)
+    if _normalize_header(config.last_name_column):
+        configured_headers.append(config.last_name_column)
 
     seen_by_normalized: dict[str, str] = {}
     for configured_header in configured_headers:
