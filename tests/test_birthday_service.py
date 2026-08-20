@@ -1,0 +1,1192 @@
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from datetime import date
+from pathlib import Path
+
+import pytest
+
+from app.birthday_rules import FixedClock
+from app.birthday_service import (
+    Summary,
+    build_email_provider,
+    build_spreadsheet_provider,
+    run_birthday_job,
+)
+from app.config import Config, ConfigError
+from app.email.base import (
+    AmbiguousSendError,
+    EmailMessage,
+    EmailProvider,
+    EmailSendError,
+)
+from app.main import main
+from app.spreadsheet.base import SpreadsheetProvider
+from app.state.sqlite import ClaimOutcome, ClaimResult, LeaseLostError
+
+
+def test_birthday_today_claims_and_sends(caplog: pytest.LogCaptureFixture) -> None:
+    provider = FakeSpreadsheetProvider(
+        rows=[
+            _row(
+                name="Test Person", email="test.person@example.com", birthday="1/1/2000"
+            )
+        ]
+    )
+    store = FakeStateStore()
+    email_provider = FakeEmailProvider()
+
+    with caplog.at_level(logging.INFO):
+        summary = run_birthday_job(
+            _build_config(),
+            spreadsheet_provider=provider,
+            state_store=store,
+            email_provider=email_provider,
+            clock=FixedClock(date(2026, 1, 1)),
+        )
+
+    assert summary == Summary(inspected=1, matched=1, sent=1)
+    assert store.claim_calls == [("test.person@example.com", 1, 1, 2026)]
+    assert store.mark_sent_calls == [(101, "lease-101")]
+    assert email_provider.sent_messages[0].to_email == "test.person@example.com"
+    assert "birthday email sent to test.person@example.com" in caplog.text
+
+
+def test_no_birthday_today_has_clean_zero_send_summary() -> None:
+    summary = run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="Test Person",
+                    email="test.person@example.com",
+                    birthday="1/2/2000",
+                )
+            ]
+        ),
+        state_store=FakeStateStore(),
+        email_provider=FakeEmailProvider(),
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert summary == Summary(inspected=1)
+
+
+def test_multiple_birthdays_are_processed_independently() -> None:
+    store = FakeStateStore()
+    email_provider = FakeEmailProvider()
+
+    summary = run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="Test Person One", email="one@example.com", birthday="1/1/2000"
+                ),
+                _row(
+                    name="Test Person Two", email="two@example.com", birthday="1/1/1999"
+                ),
+                _row(
+                    name="Test Person Three",
+                    email="three@example.com",
+                    birthday="1/2/1998",
+                ),
+            ]
+        ),
+        state_store=store,
+        email_provider=email_provider,
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert summary == Summary(inspected=3, matched=2, sent=2)
+    assert [message.to_email for message in email_provider.sent_messages] == [
+        "one@example.com",
+        "two@example.com",
+    ]
+    assert len(store.mark_sent_calls) == 2
+
+
+def test_invalid_rows_are_skipped_and_do_not_block_valid_rows(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store = FakeStateStore()
+    email_provider = FakeEmailProvider()
+
+    with caplog.at_level(logging.WARNING):
+        summary = run_birthday_job(
+            _build_config(),
+            spreadsheet_provider=FakeSpreadsheetProvider(
+                rows=[
+                    _row(
+                        name="Valid Person",
+                        email="valid@example.com",
+                        birthday="1/1/2000",
+                    ),
+                    _row(
+                        name="Bad Birthday",
+                        email="bad.birthday@example.com",
+                        birthday="not-a-date",
+                    ),
+                    _row(name="No Email", email="", birthday="1/1/2000"),
+                    {"Email": "missing.name@example.com", "Birthday": "1/1/2000"},
+                    _row(name="Bad Email", email="not-an-email", birthday="1/1/2000"),
+                ]
+            ),
+            state_store=store,
+            email_provider=email_provider,
+            clock=FixedClock(date(2026, 1, 1)),
+        )
+
+    assert summary == Summary(inspected=5, matched=1, sent=1, invalid=4)
+    assert len(email_provider.sent_messages) == 1
+    assert "row 3 skipped: missing or invalid birthday" in caplog.text
+    assert "row 4 skipped: missing or invalid email" in caplog.text
+    assert "row 5 skipped: missing name" in caplog.text
+    assert "row 6 skipped: missing or invalid email" in caplog.text
+
+
+def test_dry_run_does_not_claim_or_send(caplog: pytest.LogCaptureFixture) -> None:
+    config = _build_config(dry_run=True)
+    store = FakeStateStore()
+    email_provider = FakeEmailProvider()
+
+    with caplog.at_level(logging.INFO):
+        summary = run_birthday_job(
+            config,
+            spreadsheet_provider=FakeSpreadsheetProvider(
+                rows=[
+                    _row(
+                        name="Test Person",
+                        email="test.person@example.com",
+                        birthday="1/1/2000",
+                    )
+                ]
+            ),
+            state_store=store,
+            email_provider=email_provider,
+            clock=FixedClock(date(2026, 1, 1)),
+        )
+
+    assert summary == Summary(inspected=1, matched=1)
+    assert store.claim_calls == []
+    assert store.mark_sent_calls == []
+    assert store.mark_failed_calls == []
+    assert email_provider.sent_messages == []
+    assert (
+        "[DRY RUN] would send birthday email to test.person@example.com (Test Person)"
+        in caplog.text
+    )
+
+
+def test_dry_run_with_matching_rows_does_not_build_email_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.birthday_service.build_email_provider",
+        lambda config: pytest.fail("build_email_provider should not be called"),
+    )
+
+    summary = run_birthday_job(
+        _build_config(dry_run=True),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="Dry Run Person",
+                    email="dry.run@example.com",
+                    birthday="1/1/2000",
+                )
+            ]
+        ),
+        state_store=FakeStateStore(),
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert summary == Summary(inspected=1, matched=1)
+
+
+def test_dry_run_with_matching_rows_skips_state_store_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingStateStore:
+        def __init__(self, db_path: Path, stale_claim_timeout_minutes: int) -> None:
+            raise RuntimeError("synthetic state store construction failure")
+
+    monkeypatch.setattr("app.birthday_service.StateStore", FailingStateStore)
+
+    summary = run_birthday_job(
+        _build_config(dry_run=True),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="Dry Run Person",
+                    email="dry.run@example.com",
+                    birthday="1/1/2000",
+                )
+            ]
+        ),
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert summary == Summary(inspected=1, matched=1)
+
+
+def test_dry_run_with_matching_rows_skips_local_image_loading(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    config = _build_config(
+        dry_run=True,
+        birthday_image_mode="local",
+        birthday_image_path=Path("synthetic-missing-image.gif"),
+    )
+
+    with caplog.at_level(logging.INFO):
+        summary = run_birthday_job(
+            config,
+            spreadsheet_provider=FakeSpreadsheetProvider(
+                rows=[
+                    _row(
+                        name="Dry Run Person",
+                        email="dry.run@example.com",
+                        birthday="1/1/2000",
+                    )
+                ]
+            ),
+            state_store=FakeStateStore(),
+            clock=FixedClock(date(2026, 1, 1)),
+        )
+
+    assert summary == Summary(inspected=1, matched=1)
+    assert (
+        "[DRY RUN] would send birthday email to dry.run@example.com (Dry Run Person)"
+        in caplog.text
+    )
+
+
+def test_zero_matching_birthdays_does_not_build_email_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.birthday_service.build_email_provider",
+        lambda config: pytest.fail("build_email_provider should not be called"),
+    )
+
+    summary = run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="No Match Person",
+                    email="no.match@example.com",
+                    birthday="1/2/2000",
+                )
+            ]
+        ),
+        state_store=FakeStateStore(),
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert summary == Summary(inspected=1)
+
+
+def test_zero_matching_birthdays_skip_state_store_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingStateStore:
+        def __init__(self, db_path: Path, stale_claim_timeout_minutes: int) -> None:
+            raise RuntimeError("synthetic state store construction failure")
+
+    monkeypatch.setattr("app.birthday_service.StateStore", FailingStateStore)
+
+    summary = run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="No Match Person",
+                    email="no.match@example.com",
+                    birthday="1/2/2000",
+                )
+            ]
+        ),
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert summary == Summary(inspected=1)
+
+
+def test_zero_matching_birthdays_skip_local_image_loading() -> None:
+    summary = run_birthday_job(
+        _build_config(
+            birthday_image_mode="local",
+            birthday_image_path=Path("synthetic-missing-image.gif"),
+        ),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="No Match Person",
+                    email="no.match@example.com",
+                    birthday="1/2/2000",
+                )
+            ]
+        ),
+        state_store=FakeStateStore(),
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert summary == Summary(inspected=1)
+
+
+def test_real_matches_build_and_close_state_store_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created_stores: list[TrackingStateStore] = []
+
+    class TrackingStateStore(FakeStateStore):
+        def __init__(self, db_path: Path, stale_claim_timeout_minutes: int) -> None:
+            super().__init__()
+            self.db_path = db_path
+            self.stale_claim_timeout_minutes = stale_claim_timeout_minutes
+            self.close_calls = 0
+            created_stores.append(self)
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    monkeypatch.setattr("app.birthday_service.StateStore", TrackingStateStore)
+
+    email_provider = FakeEmailProvider()
+    summary = run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="Match One",
+                    email="match.one@example.com",
+                    birthday="1/1/2000",
+                )
+            ]
+        ),
+        email_provider=email_provider,
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert summary == Summary(inspected=1, matched=1, sent=1)
+    assert len(created_stores) == 1
+    assert created_stores[0].claim_calls == [("match.one@example.com", 1, 1, 2026)]
+    assert created_stores[0].mark_sent_calls == [(101, "lease-101")]
+    assert created_stores[0].close_calls == 1
+    assert email_provider.sent_messages[0].to_email == "match.one@example.com"
+
+
+def test_real_matches_build_email_provider_once_and_reuse_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    build_calls = 0
+    fake_mailer = FakeEmailProvider()
+
+    def fake_build_email_provider(config: Config) -> EmailProvider:
+        nonlocal build_calls
+        build_calls += 1
+        return fake_mailer
+
+    monkeypatch.setattr(
+        "app.birthday_service.build_email_provider", fake_build_email_provider
+    )
+
+    summary = run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="Match One",
+                    email="match.one@example.com",
+                    birthday="1/1/2000",
+                ),
+                _row(
+                    name="Match Two",
+                    email="match.two@example.com",
+                    birthday="1/1/1999",
+                ),
+            ]
+        ),
+        state_store=FakeStateStore(),
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert summary == Summary(inspected=2, matched=2, sent=2)
+    assert build_calls == 1
+    assert [message.to_email for message in fake_mailer.sent_messages] == [
+        "match.one@example.com",
+        "match.two@example.com",
+    ]
+
+
+def test_real_matches_load_local_image_once_and_reuse_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    image_path = tmp_path / "synthetic-banner.jpg"
+    image_bytes = b"synthetic-jpeg-bytes"
+    image_path.write_bytes(image_bytes)
+
+    read_calls = 0
+    original_read_bytes = Path.read_bytes
+
+    def counting_read_bytes(self: Path) -> bytes:
+        nonlocal read_calls
+        if self == image_path:
+            read_calls += 1
+        return original_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", counting_read_bytes)
+
+    email_provider = FakeEmailProvider()
+    summary = run_birthday_job(
+        _build_config(
+            birthday_image_mode="local",
+            birthday_image_path=image_path,
+        ),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="Match One",
+                    email="match.one@example.com",
+                    birthday="1/1/2000",
+                ),
+                _row(
+                    name="Match Two",
+                    email="match.two@example.com",
+                    birthday="1/1/1999",
+                ),
+            ]
+        ),
+        state_store=FakeStateStore(),
+        email_provider=email_provider,
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert summary == Summary(inspected=2, matched=2, sent=2)
+    assert read_calls == 1
+    assert len(email_provider.sent_messages) == 2
+    assert email_provider.sent_messages[0].inline_image is not None
+    assert email_provider.sent_messages[0].inline_image.data == image_bytes
+    assert email_provider.sent_messages[0].inline_image.mime_type == "image/jpeg"
+    assert email_provider.sent_messages[1].inline_image is not None
+    assert email_provider.sent_messages[1].inline_image.data == image_bytes
+
+
+def test_test_date_clock_is_used_instead_of_real_date() -> None:
+    config = _build_config(test_date=date(2026, 2, 14))
+    summary = run_birthday_job(
+        config,
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="Valentine Test",
+                    email="valentine@example.com",
+                    birthday="2/14/2000",
+                )
+            ]
+        ),
+        state_store=FakeStateStore(),
+        email_provider=FakeEmailProvider(),
+    )
+
+    assert summary == Summary(inspected=1, matched=1, sent=1)
+
+
+def test_spreadsheet_mode_selection_google_sheet(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    google_provider = FakeSpreadsheetProvider(rows=[])
+    monkeypatch.setattr(
+        "app.birthday_service.GoogleSheetsProvider.from_credentials",
+        classmethod(lambda cls, config, credentials: google_provider),
+    )
+
+    provider = build_spreadsheet_provider(
+        _build_config(spreadsheet_mode="google_sheet"), credentials=object()
+    )
+
+    assert provider is google_provider
+
+
+def test_spreadsheet_mode_selection_xlsx_drive(monkeypatch: pytest.MonkeyPatch) -> None:
+    drive_provider = FakeSpreadsheetProvider(rows=[])
+    monkeypatch.setattr(
+        "app.birthday_service.XlsxDriveProvider.from_credentials",
+        classmethod(lambda cls, config, credentials: drive_provider),
+    )
+
+    provider = build_spreadsheet_provider(
+        _build_config(spreadsheet_mode="xlsx_drive"), credentials=object()
+    )
+
+    assert provider is drive_provider
+
+
+@pytest.mark.parametrize(
+    ("spreadsheet_mode", "expected_scope"),
+    [
+        ("google_sheet", "https://www.googleapis.com/auth/spreadsheets.readonly"),
+        ("xlsx_drive", "https://www.googleapis.com/auth/drive.readonly"),
+    ],
+)
+def test_build_spreadsheet_provider_requests_only_read_scope(
+    monkeypatch: pytest.MonkeyPatch,
+    spreadsheet_mode: str,
+    expected_scope: str,
+) -> None:
+    captured_scopes: list[str] = []
+    created_credentials: list[FakeCredentials] = []
+    provider_credentials: list[FakeCredentials] = []
+
+    class FakeCredentials:
+        def __init__(self) -> None:
+            self.with_subject_calls: list[str] = []
+
+        def with_subject(self, subject: str) -> FakeCredentials:
+            self.with_subject_calls.append(subject)
+            return self
+
+    def fake_from_service_account_file(
+        filename: str, *, scopes: list[str]
+    ) -> FakeCredentials:
+        captured_scopes.extend(scopes)
+        credentials = FakeCredentials()
+        created_credentials.append(credentials)
+        return credentials
+
+    monkeypatch.setattr(
+        "app.birthday_service.service_account.Credentials.from_service_account_file",
+        fake_from_service_account_file,
+    )
+    monkeypatch.setattr(
+        "app.birthday_service.GoogleSheetsProvider.from_credentials",
+        classmethod(
+            lambda cls, config, credentials: (
+                provider_credentials.append(credentials),
+                FakeSpreadsheetProvider(rows=[]),
+            )[1]
+        ),
+    )
+    monkeypatch.setattr(
+        "app.birthday_service.XlsxDriveProvider.from_credentials",
+        classmethod(
+            lambda cls, config, credentials: (
+                provider_credentials.append(credentials),
+                FakeSpreadsheetProvider(rows=[]),
+            )[1]
+        ),
+    )
+
+    build_spreadsheet_provider(_build_config(spreadsheet_mode=spreadsheet_mode))
+
+    assert captured_scopes == [expected_scope]
+    assert "https://www.googleapis.com/auth/gmail.send" not in captured_scopes
+    assert len(created_credentials) == 1
+    assert provider_credentials == [created_credentials[0]]
+    assert created_credentials[0].with_subject_calls == []
+
+
+def test_build_email_provider_requests_only_gmail_send_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_scopes: list[str] = []
+    provider_credentials: list[FakeCredentials] = []
+
+    class FakeCredentials:
+        def __init__(self) -> None:
+            self.with_subject_calls: list[str] = []
+
+        def with_subject(self, subject: str) -> FakeCredentials:
+            self.with_subject_calls.append(subject)
+            return self
+
+    def fake_from_service_account_file(
+        filename: str, *, scopes: list[str]
+    ) -> FakeCredentials:
+        captured_scopes.extend(scopes)
+        return FakeCredentials()
+
+    monkeypatch.setattr(
+        "app.birthday_service.service_account.Credentials.from_service_account_file",
+        fake_from_service_account_file,
+    )
+    monkeypatch.setattr(
+        "app.birthday_service.GmailProvider.from_credentials",
+        classmethod(
+            lambda cls, config, credentials: (
+                provider_credentials.append(credentials),
+                FakeEmailProvider(),
+            )[1]
+        ),
+    )
+
+    config = _build_config()
+    provider = build_email_provider(config)
+
+    assert isinstance(provider, FakeEmailProvider)
+    assert captured_scopes == ["https://www.googleapis.com/auth/gmail.send"]
+    assert len(provider_credentials) == 1
+    assert provider_credentials[0].with_subject_calls == [
+        config.google_impersonate_subject
+    ]
+
+
+def test_email_provider_failure_marks_failed_and_continues() -> None:
+    store = FakeStateStore()
+    email_provider = FakeEmailProvider(
+        effects=[
+            EmailSendError("synthetic failure"),
+            None,
+        ]
+    )
+
+    summary = run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="Failure Case",
+                    email="failure@example.com",
+                    birthday="1/1/2000",
+                ),
+                _row(
+                    name="Success Case",
+                    email="success@example.com",
+                    birthday="1/1/2000",
+                ),
+            ]
+        ),
+        state_store=store,
+        email_provider=email_provider,
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert summary == Summary(inspected=2, matched=2, sent=1, failed=1)
+    assert store.mark_failed_calls == [(101, "lease-101")]
+    assert store.mark_sent_calls == [(102, "lease-102")]
+
+
+def test_duplicate_claim_skips_send() -> None:
+    summary = run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="Duplicate Person",
+                    email="dup@example.com",
+                    birthday="1/1/2000",
+                )
+            ]
+        ),
+        state_store=FakeStateStore(
+            claim_results=[ClaimResult(ClaimOutcome.ALREADY_SENT)]
+        ),
+        email_provider=FakeEmailProvider(),
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert summary == Summary(inspected=1, matched=1, duplicates=1)
+
+
+def test_duplicate_claim_skips_render_and_local_image_loading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    read_calls = 0
+    original_read_bytes = Path.read_bytes
+
+    def counting_read_bytes(self: Path) -> bytes:
+        nonlocal read_calls
+        if self == Path("synthetic-missing-image.gif"):
+            read_calls += 1
+        return original_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", counting_read_bytes)
+
+    summary = run_birthday_job(
+        _build_config(
+            birthday_image_mode="local",
+            birthday_image_path=Path("synthetic-missing-image.gif"),
+        ),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="Duplicate Person",
+                    email="dup@example.com",
+                    birthday="1/1/2000",
+                )
+            ]
+        ),
+        state_store=FakeStateStore(
+            claim_results=[ClaimResult(ClaimOutcome.ALREADY_SENT)]
+        ),
+        email_provider=FakeEmailProvider(),
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert summary == Summary(inspected=1, matched=1, duplicates=1)
+    assert read_calls == 0
+
+
+def test_in_progress_claim_skips_send() -> None:
+    summary = run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="In Progress Person",
+                    email="progress@example.com",
+                    birthday="1/1/2000",
+                )
+            ]
+        ),
+        state_store=FakeStateStore(
+            claim_results=[ClaimResult(ClaimOutcome.IN_PROGRESS)]
+        ),
+        email_provider=FakeEmailProvider(),
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert summary == Summary(inspected=1, matched=1, in_progress=1)
+
+
+def test_ambiguous_send_marks_failed_and_logs_critical(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store = FakeStateStore()
+    email_provider = FakeEmailProvider(
+        effects=[AmbiguousSendError("synthetic ambiguous failure")]
+    )
+
+    with caplog.at_level(logging.INFO):
+        summary = run_birthday_job(
+            _build_config(),
+            spreadsheet_provider=FakeSpreadsheetProvider(
+                rows=[
+                    _row(
+                        name="Ambiguous Person",
+                        email="ambiguous@example.com",
+                        birthday="1/1/2000",
+                    )
+                ]
+            ),
+            state_store=store,
+            email_provider=email_provider,
+            clock=FixedClock(date(2026, 1, 1)),
+        )
+
+    assert summary == Summary(inspected=1, matched=1, ambiguous=1)
+    assert store.mark_failed_calls == []
+    critical_records = [
+        record for record in caplog.records if record.levelno == logging.CRITICAL
+    ]
+    assert critical_records
+    assert "outcome is unknown" in critical_records[0].getMessage()
+    assert "duplicate email" in critical_records[0].getMessage()
+    assert "ambiguous@example.com" in critical_records[0].getMessage()
+
+
+def test_ambiguous_send_does_not_abort_batch_or_mark_failed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store = FakeStateStore()
+    email_provider = FakeEmailProvider(
+        effects=[AmbiguousSendError("synthetic ambiguous failure"), None]
+    )
+
+    with caplog.at_level(logging.INFO):
+        summary = run_birthday_job(
+            _build_config(),
+            spreadsheet_provider=FakeSpreadsheetProvider(
+                rows=[
+                    _row(
+                        name="Ambiguous Person",
+                        email="ambiguous@example.com",
+                        birthday="1/1/2000",
+                    ),
+                    _row(
+                        name="Success Person",
+                        email="success@example.com",
+                        birthday="1/1/2000",
+                    ),
+                ]
+            ),
+            state_store=store,
+            email_provider=email_provider,
+            clock=FixedClock(date(2026, 1, 1)),
+        )
+
+    assert summary == Summary(inspected=2, matched=2, sent=1, ambiguous=1)
+    assert store.mark_failed_calls == []
+    assert store.mark_sent_calls == [(102, "lease-102")]
+    assert "birthday email sent to success@example.com" in caplog.text
+
+
+def test_email_send_failure_mark_failed_lease_loss_does_not_abort_batch(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store = FakeStateStore(mark_failed_effects=[LeaseLostError("synthetic lease loss")])
+    email_provider = FakeEmailProvider(
+        effects=[EmailSendError("synthetic failure"), None]
+    )
+
+    with caplog.at_level(logging.INFO):
+        summary = run_birthday_job(
+            _build_config(),
+            spreadsheet_provider=FakeSpreadsheetProvider(
+                rows=[
+                    _row(
+                        name="Failure Person",
+                        email="failure@example.com",
+                        birthday="1/1/2000",
+                    ),
+                    _row(
+                        name="Success Person",
+                        email="success@example.com",
+                        birthday="1/1/2000",
+                    ),
+                ]
+            ),
+            state_store=store,
+            email_provider=email_provider,
+            clock=FixedClock(date(2026, 1, 1)),
+        )
+
+    assert summary == Summary(inspected=2, matched=2, sent=1, failed=1)
+    assert store.mark_failed_calls == [(101, "lease-101")]
+    assert store.mark_sent_calls == [(102, "lease-102")]
+    assert "failed to mark claim as failed for failure@example.com" in caplog.text
+    assert "birthday email sent to success@example.com" in caplog.text
+
+
+def test_mark_sent_lease_loss_after_send_is_ambiguous_and_critical(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store = FakeStateStore(mark_sent_effects=[LeaseLostError("synthetic lease loss")])
+    email_provider = FakeEmailProvider()
+
+    with caplog.at_level(logging.INFO):
+        summary = run_birthday_job(
+            _build_config(),
+            spreadsheet_provider=FakeSpreadsheetProvider(
+                rows=[
+                    _row(
+                        name="Lease Loss Person",
+                        email="lease-loss@example.com",
+                        birthday="1/1/2000",
+                    )
+                ]
+            ),
+            state_store=store,
+            email_provider=email_provider,
+            clock=FixedClock(date(2026, 1, 1)),
+        )
+
+    assert summary == Summary(inspected=1, matched=1, ambiguous=1)
+    assert store.mark_sent_calls == [(101, "lease-101")]
+    assert store.mark_failed_calls == []
+    critical_records = [
+        record for record in caplog.records if record.levelno == logging.CRITICAL
+    ]
+    assert critical_records
+    critical_message = critical_records[0].getMessage()
+    assert "birthday email was sent to lease-loss@example.com" in critical_message
+    assert "could not durably record it" in critical_message
+    assert "duplicate email" in critical_message
+
+
+def test_mark_sent_generic_error_after_send_is_ambiguous_and_critical(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store = FakeStateStore(mark_sent_effects=[RuntimeError("synthetic store failure")])
+    email_provider = FakeEmailProvider()
+
+    with caplog.at_level(logging.INFO):
+        summary = run_birthday_job(
+            _build_config(),
+            spreadsheet_provider=FakeSpreadsheetProvider(
+                rows=[
+                    _row(
+                        name="Store Failure Person",
+                        email="store-failure@example.com",
+                        birthday="1/1/2000",
+                    )
+                ]
+            ),
+            state_store=store,
+            email_provider=email_provider,
+            clock=FixedClock(date(2026, 1, 1)),
+        )
+
+    assert summary == Summary(inspected=1, matched=1, ambiguous=1)
+    assert summary.sent == 0
+    assert summary.failed == 0
+    assert store.mark_sent_calls == [(101, "lease-101")]
+    assert store.mark_failed_calls == []
+    critical_records = [
+        record for record in caplog.records if record.levelno == logging.CRITICAL
+    ]
+    assert critical_records
+    critical_message = critical_records[0].getMessage()
+    assert "birthday email was sent to store-failure@example.com" in critical_message
+    assert "could not durably record it" in critical_message
+    assert "duplicate email" in critical_message
+
+
+def test_main_exits_one_on_config_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("app.main.load_config", _raise_config_error)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+    assert "synthetic config error" in capsys.readouterr().err
+
+
+def test_main_exits_zero_when_summary_has_no_failed_or_ambiguous(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("app.main.load_config", _build_config)
+    monkeypatch.setattr(
+        "app.main.run_birthday_job",
+        lambda config, *, clock=None: Summary(
+            inspected=7,
+            matched=4,
+            sent=2,
+            duplicates=1,
+            invalid=3,
+        ),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 0
+    stderr = capsys.readouterr().err
+    assert (
+        "INFO app.main summary: inspected=7 matched=4 sent=2 duplicates=1 "
+        "in_progress=0 invalid=3 failed=0 ambiguous=0" in stderr
+    )
+    assert "INFO app.main job completed" in stderr
+    assert "ERROR app.main" not in stderr
+
+
+def test_main_exits_one_when_summary_has_failed_sends(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("app.main.load_config", _build_config)
+    monkeypatch.setattr(
+        "app.main.run_birthday_job",
+        lambda config, *, clock=None: Summary(
+            inspected=2,
+            matched=2,
+            sent=1,
+            failed=1,
+        ),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+    stderr = capsys.readouterr().err
+    assert (
+        "ERROR app.main job completed with delivery issues: failed=1 ambiguous=0 "
+        "in_progress=0" in stderr
+    )
+    assert "INFO app.main job completed\n" not in stderr
+
+
+def test_main_exits_one_when_summary_has_ambiguous_sends(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("app.main.load_config", _build_config)
+    monkeypatch.setattr(
+        "app.main.run_birthday_job",
+        lambda config, *, clock=None: Summary(
+            inspected=1,
+            matched=1,
+            ambiguous=1,
+        ),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+    stderr = capsys.readouterr().err
+    assert (
+        "ERROR app.main job completed with delivery issues: failed=0 ambiguous=1 "
+        "in_progress=0" in stderr
+    )
+    assert "INFO app.main job completed\n" not in stderr
+
+
+def test_main_exits_one_when_summary_has_in_progress_sends(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("app.main.load_config", _build_config)
+    monkeypatch.setattr(
+        "app.main.run_birthday_job",
+        lambda config, *, clock=None: Summary(
+            inspected=1,
+            matched=1,
+            in_progress=1,
+        ),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 1
+    stderr = capsys.readouterr().err
+    assert (
+        "ERROR app.main job completed with delivery issues: failed=0 ambiguous=0 "
+        "in_progress=1" in stderr
+    )
+    assert "INFO app.main job completed\n" not in stderr
+
+
+def test_main_uses_single_clock_for_logging_and_job_execution(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class AdvancingClock:
+        def __init__(self) -> None:
+            self._dates = [date(2026, 1, 1), date(2026, 1, 2)]
+            self.calls = 0
+
+        def today(self) -> date:
+            value = self._dates[min(self.calls, len(self._dates) - 1)]
+            self.calls += 1
+            return value
+
+    clock = AdvancingClock()
+    observed_dates: list[date] = []
+
+    monkeypatch.setattr("app.main.load_config", _build_config)
+    monkeypatch.setattr("app.main.build_clock", lambda config: clock)
+
+    def fake_run_birthday_job(config: Config, *, clock: object = None) -> Summary:
+        assert clock is not None
+        observed_dates.append(clock.today())  # type: ignore[union-attr]
+        return Summary()
+
+    monkeypatch.setattr("app.main.run_birthday_job", fake_run_birthday_job)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 0
+    assert observed_dates == [date(2026, 1, 1)]
+    assert clock.calls == 1
+    stderr = capsys.readouterr().err
+    assert "INFO app.main job starting: date=2026-01-01 " in stderr
+
+
+class FakeSpreadsheetProvider(SpreadsheetProvider):
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+
+    def load_rows(self) -> list[dict[str, object]]:
+        return list(self.rows)
+
+
+@dataclass
+class FakeStateStore:
+    claim_results: list[ClaimResult] = field(default_factory=list)
+    claim_calls: list[tuple[str, int, int, int]] = field(default_factory=list)
+    mark_sent_calls: list[tuple[int, str]] = field(default_factory=list)
+    mark_failed_calls: list[tuple[int, str]] = field(default_factory=list)
+    mark_sent_effects: list[Exception] = field(default_factory=list)
+    mark_failed_effects: list[Exception] = field(default_factory=list)
+    _claim_counter: int = 100
+
+    def claim(self, email: str, month: int, day: int, year: int) -> ClaimResult:
+        self.claim_calls.append((email, month, day, year))
+        if self.claim_results:
+            return self.claim_results.pop(0)
+        self._claim_counter += 1
+        return ClaimResult(
+            ClaimOutcome.CLAIMED, self._claim_counter, f"lease-{self._claim_counter}"
+        )
+
+    def mark_sent(self, claim_id: int, lease_token: str) -> None:
+        self.mark_sent_calls.append((claim_id, lease_token))
+        if self.mark_sent_effects:
+            raise self.mark_sent_effects.pop(0)
+
+    def mark_failed(self, claim_id: int, lease_token: str) -> None:
+        self.mark_failed_calls.append((claim_id, lease_token))
+        if self.mark_failed_effects:
+            raise self.mark_failed_effects.pop(0)
+
+    def close(self) -> None:
+        return None
+
+
+class FakeEmailProvider(EmailProvider):
+    def __init__(self, effects: list[Exception | None] | None = None) -> None:
+        self.effects = list(effects or [])
+        self.sent_messages: list[EmailMessage] = []
+
+    def send(self, message: EmailMessage) -> None:
+        self.sent_messages.append(message)
+        if self.effects:
+            effect = self.effects.pop(0)
+            if effect is not None:
+                raise effect
+
+
+def _build_config(
+    *,
+    dry_run: bool = False,
+    spreadsheet_mode: str = "google_sheet",
+    test_date: date | None = None,
+    birthday_image_mode: str = "url",
+    birthday_image_path: Path = Path("app/assets/birthday_banner.jpg"),
+) -> Config:
+    return Config(
+        app_timezone="America/Chicago",
+        dry_run=dry_run,
+        test_date=test_date,
+        spreadsheet_mode=spreadsheet_mode,
+        google_sheet_id="synthetic-sheet-id",
+        google_sheet_tab="Birthdays",
+        google_drive_file_id="synthetic-drive-id",
+        name_column="Name",
+        email_column="Email",
+        birthday_column="Birthday",
+        last_sent_year_column="Last Birthday Email Year",
+        email_provider="gmail",
+        email_from_name="Example Sender",
+        email_from_address="sender@example.com",
+        email_subject_template="Happy Birthday, {{name}}! 🎉",
+        google_credentials_file=Path("synthetic-credentials.json"),
+        google_impersonate_subject="sender@example.com",
+        birthday_image_mode=birthday_image_mode,
+        birthday_image_path=birthday_image_path,
+        birthday_image_url="https://assets.example.com/birthday-banner.jpg",
+        birthday_image_alt="Happy Birthday banner",
+        birthday_image_width=600,
+        state_db_path=Path("synthetic-state.db"),
+        stale_claim_timeout_minutes=30,
+        retry_max_attempts=3,
+        retry_base_delay_seconds=0.25,
+        log_level="INFO",
+    )
+
+
+def _row(*, name: str, email: str, birthday: object) -> dict[str, object]:
+    return {
+        "Name": name,
+        "Email": email,
+        "Birthday": birthday,
+    }
+
+
+def _raise_config_error() -> Config:
+    raise ConfigError("synthetic config error")

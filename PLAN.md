@@ -174,16 +174,29 @@ interactive OAuth consent, no refresh-token storage/rotation to manage.
   - `https://www.googleapis.com/auth/spreadsheets.readonly` (google_sheet mode)
   - `https://www.googleapis.com/auth/drive.readonly` (xlsx_drive mode)
   - `https://www.googleapis.com/auth/gmail.send` (always, for sending)
-- Use **domain-wide delegation**: credentials are subject-impersonated via
-  `.with_subject(GOOGLE_IMPERSONATE_SUBJECT or EMAIL_FROM_ADDRESS)` so Gmail
-  send acts as that mailbox, and Sheets/Drive reads run as that user's
-  identity (the sheet/file must be visible to that user, or shared directly
-  with the service account's email if delegation is not configured).
-- Document in README both paths: (a) Workspace domain-wide delegation
-  (recommended for production), (b) simple sharing the Sheet/Drive file
-  with the service account's `client_email` (works without delegation, but
-  then Gmail send needs delegation regardless since a bare service account
-  cannot send as a real mailbox).
+- **Amendment (post-Milestone-6 review):** impersonation
+  (`.with_subject(GOOGLE_IMPERSONATE_SUBJECT or EMAIL_FROM_ADDRESS)`) is
+  used ONLY for the Gmail credential — Gmail send is a hard platform
+  requirement (a bare service account cannot send mail as a real mailbox
+  at all, delegated or not). Spreadsheet credentials (Sheets/Drive) are
+  built WITHOUT `.with_subject()` — they always authenticate as the bare
+  service account identity. This is simpler and more secure-by-default
+  than the originally-planned "impersonate everywhere" design: it uses
+  the minimum impersonation footprint needed (only where the platform
+  requires it), and it makes the operator setup step identical
+  regardless of whether domain-wide delegation is configured at all —
+  the target Google Sheet or the `.xlsx` file in Drive is shared
+  directly with the service account's own `client_email`, the same way,
+  every time. Domain-wide delegation is still required (Workspace admin
+  console) to authorize the `gmail.send` impersonation subject to send
+  as that mailbox; it is not needed for, and has no effect on,
+  spreadsheet access.
+- Document in README: (1) share the Sheet/Drive file directly with the
+  service account's `client_email` (Editor/Viewer as appropriate) — this
+  is required in all cases; (2) configure Workspace domain-wide
+  delegation for the service account so it may impersonate
+  `GOOGLE_IMPERSONATE_SUBJECT`/`EMAIL_FROM_ADDRESS` specifically for the
+  `gmail.send` scope.
 - Never log credential contents or full tokens. `GOOGLE_CREDENTIALS_FILE`
   path may be logged; its contents never.
 
@@ -389,16 +402,62 @@ before `.execute()` is called — definitely not sent, always safe to
 retry) from *post-dispatch* failures (the `.execute()` call itself
 raised — outcome unknown, Gmail may have already accepted it) by raising
 a dedicated `AmbiguousSendError(EmailSendError)` for the latter case.
-**Milestone 6 requirement:** when `birthday_service` catches
-`AmbiguousSendError`, it must still call `mark_failed()` (never silently
-drop the row — it must remain visible), but must also log a distinct,
-prominent warning (e.g. `CRITICAL`/`ERROR`, not the routine failure log
-level) naming the client and stating the send outcome is unknown and a
-future reclaim could double-send, so an operator can manually verify via
-the Sent folder before the row is naturally reclaimed on a later run.
-This does not eliminate the residual risk, but makes it visible and rare
+**Milestone 6 requirement (refined post-Milestone-6 review):**
+when `birthday_service` catches `AmbiguousSendError`, it must NOT call
+`mark_failed()` — a `failed` row has no staleness gate and becomes
+immediately reclaimable on literally the very next `claim()` attempt
+(including an operator-triggered manual rerun moments later), which
+defeats the purpose of surfacing this case distinctly at all. Instead,
+leave the row exactly as `claim()` left it (`pending`) — untouched — so
+it only becomes reclaimable after `STALE_CLAIM_TIMEOUT_MINUTES` elapses,
+the same as any other unresolved claim. That reuses the existing
+staleness mechanism (no new terminal status, no schema change, no
+reconciliation workflow — a full quarantine state was already rejected
+above as disproportionate engineering) to buy a real grace window
+(default 30 minutes) between the prominent `CRITICAL` log and the
+earliest possible reclaim, giving an operator a genuine chance to check
+the mailbox first. It must still log a distinct, prominent warning
+(`CRITICAL`, not the routine failure log level) naming the client and
+stating the send outcome is unknown and a future reclaim could
+double-send. This does not eliminate the residual risk, but makes it
+visible and rare
 (it requires a successful request whose specific response is then lost)
 rather than silent.
+
+**Known limitation (accepted):** `main()` exits non-zero on the run that
+*detects* an ambiguous send (`summary.ambiguous > 0`), which is when the
+CRITICAL log is emitted. If an operator or scheduler reruns the job
+before `STALE_CLAIM_TIMEOUT_MINUTES` elapses, that rerun sees the row as
+`IN_PROGRESS` (not `ambiguous`) and can exit 0, even though the original
+issue is still unresolved underneath. Closing this gap properly would
+require persisting additional state to distinguish "routine concurrent
+`IN_PROGRESS`" from "unresolved ambiguous send awaiting verification" —
+i.e. the same quarantine/reconciliation machinery already rejected above
+as disproportionate for this project. The operator has already seen the
+CRITICAL log naming the exact risk at detection time; this is accepted
+as a narrow, documented residual limitation rather than a bug to
+engineer around.
+
+**Known limitation (accepted):** Milestone 6's lazy construction of
+`StateStore`, the `EmailProvider`, and the local inline-image bytes
+(sections above) means a dry-run or a genuine zero-birthday-today
+production run never touches Gmail auth, the SQLite state file, or the
+local image path at all. This is an intentional trade-off, not an
+oversight: it's the direct fix for the earlier, symmetric problem where
+those same no-op runs were failing hard on unrelated credential/DB/image
+issues (see the lazy-construction fixes above). The flip side is real —
+a broken Gmail delegation, an unwritable `STATE_DB_PATH`, or a corrupted
+local image can go undetected through any number of clean-looking
+zero-match days, surfacing only on the first day a birthday actually
+needs to be sent. A proper fix (an explicit strict-validation/healthcheck
+mode that eagerly exercises the full send path regardless of whether
+anything will be sent today) is genuinely new scope beyond this
+project's original spec — it is not implemented here. Operators who want
+continuous readiness signal should periodically exercise the real send
+path deliberately (for example a scheduled `DRY_RUN=false` run against a
+synthetic test recipient/date via `TEST_DATE`, run outside the normal
+daily schedule) rather than relying on an ordinary day's clean exit code
+as proof the send path works.
 
 Subject default: `Happy Birthday, {{name}}! 🎉` rendered via
 `EMAIL_SUBJECT_TEMPLATE` (Jinja2), same templating engine as the body so

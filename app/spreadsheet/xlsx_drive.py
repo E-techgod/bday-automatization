@@ -5,6 +5,7 @@ from io import BytesIO
 from typing import Any
 from zipfile import BadZipFile
 
+from googleapiclient.discovery import build  # type: ignore[import-untyped]
 from googleapiclient.errors import HttpError  # type: ignore[import-untyped]
 from httplib2 import HttpLib2Error  # type: ignore[import-untyped]
 from openpyxl import load_workbook  # type: ignore[import-untyped]
@@ -33,6 +34,13 @@ class XlsxDriveProvider(SpreadsheetProvider):
     def __init__(self, config: Config, service_factory: DriveServiceFactory) -> None:
         self._config = config
         self._service_factory = service_factory
+
+    @classmethod
+    def from_credentials(cls, config: Config, credentials: Any) -> XlsxDriveProvider:
+        def service_factory() -> Any:
+            return build("drive", "v3", credentials=credentials)
+
+        return cls(config=config, service_factory=service_factory)
 
     def load_rows(self) -> list[dict[str, object]]:
         try:
