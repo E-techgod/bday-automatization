@@ -71,9 +71,23 @@ class GmailProvider(EmailProvider):
             image_subtype = _image_subtype_from_mime_type(
                 message.inline_image.mime_type
             )
-            image_part = MIMEImage(message.inline_image.data, _subtype=image_subtype)
-            image_part.add_header("Content-ID", f"<{message.inline_image.content_id}>")
-            image_part.add_header("Content-Disposition", "inline")
+            image_part = MIMEImage(
+                message.inline_image.data,
+                _subtype=image_subtype,
+                name="birthday_banner.jpg",
+            )
+
+            image_part.add_header(
+                "Content-ID",
+                f"<{message.inline_image.content_id}>",
+            )
+
+            image_part.add_header(
+                "Content-Disposition",
+                "inline",
+                filename="birthday_banner.jpg",
+            )
+
             mime_message.attach(image_part)
 
         encoded_message = base64.urlsafe_b64encode(mime_message.as_bytes())
