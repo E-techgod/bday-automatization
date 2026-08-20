@@ -438,11 +438,26 @@ CRITICAL log naming the exact risk at detection time; this is accepted
 as a narrow, documented residual limitation rather than a bug to
 engineer around.
 
+**Correction:** `app/main.py` was later changed so
+`summary.in_progress > 0` also triggers exit status 1. A rerun that hits
+the still-pending claim as `IN_PROGRESS` therefore exits non-zero today;
+it does not exit 0. The real remaining limitation is narrower: the exit
+code alone cannot distinguish a routine overlapping-run `IN_PROGRESS`
+from an unresolved ambiguous-send incident that now presents as
+`IN_PROGRESS` on rerun, because `app/birthday_service.py` increments the
+same `summary.in_progress` counter for both cases and `main()` treats
+either as exit-1. Operators therefore must inspect the log content
+rather than the exit code alone, and any earlier `CRITICAL` ambiguous-send
+log remains the authoritative signal until the mailbox has been verified
+manually.
+
 **Known limitation (accepted):** Milestone 6's lazy construction of
 `StateStore`, the `EmailProvider`, and the local inline-image bytes
 (sections above) means a dry-run or a genuine zero-birthday-today
 production run never touches Gmail auth, the SQLite state file, or the
-local image path at all. This is an intentional trade-off, not an
+local image file's bytes at all (only its existence as a file is
+validated eagerly at startup; the byte read and MIME-type sniff are
+lazy). This is an intentional trade-off, not an
 oversight: it's the direct fix for the earlier, symmetric problem where
 those same no-op runs were failing hard on unrelated credential/DB/image
 issues (see the lazy-construction fixes above). The flip side is real —
@@ -488,12 +503,17 @@ passes in: `name`, `image_mode`, `image_alt`, `image_width`, `image_url`.
 ## 13. Birthday Image Implementation
 
 - `none`: `image_mode="none"` passed to template, no attachment built.
-- `local`: `birthday_service` reads `BIRTHDAY_IMAGE_PATH` bytes at startup
-  (already validated to exist by `config.py`), builds `InlineImage(content_id="birthday_banner",
-  data=..., mime_type=<sniffed from extension>)`, passed to
-  `EmailMessage.inline_image`. Gmail provider attaches it as
-  `Content-ID: <birthday_banner>`; template references `cid:birthday_banner`.
-  No `file://` URL ever touches the HTML.
+- `local`: `config.py` eagerly validates at startup that
+  `BIRTHDAY_IMAGE_PATH` points to an existing file, but
+  `birthday_service` builds a memoized accessor in `run_birthday_job()`;
+  the actual `InlineImage(content_id="birthday_banner", data=...,
+  mime_type=<sniffed from extension>)` construction only happens the first
+  time a real send path invokes that accessor. That means the image byte
+  read and MIME-type sniff are lazy, not startup work, and they do not run
+  for `DRY_RUN=true` or zero-birthday-today runs. When constructed, the
+  resulting image is passed to `EmailMessage.inline_image`; Gmail attaches
+  it as `Content-ID: <birthday_banner>`, and the template references
+  `cid:birthday_banner`. No `file://` URL ever touches the HTML.
 - `url`: no attachment; template embeds `BIRTHDAY_IMAGE_URL` directly, must
   be validated `https://` at config time.
 - Include a real placeholder `app/assets/birthday_banner.jpg` so `local`
@@ -517,13 +537,10 @@ logged and skipped.
   uses `datetime.now(ZoneInfo(APP_TIMEZONE)).date()`; when `TEST_DATE` is
   set, the clock returns that fixed date instead. This is the single
   seam tests use instead of a mocking library.
-- `DRY_RUN=true`: run the full pipeline (load, parse, match, render,
-  validate) but skip both `EmailProvider.send()` and any SQLite write —
-  log `"[DRY RUN] would send to <normalized-email-domain-redacted-or-not>..."`
-  at INFO with enough detail to be useful without dumping full client PII
-  (name/email may be logged in dry-run explicitly since spec says "log
-  what would happen" and dry-run is an operator-facing debug mode — full
-  address is fine here, just don't dump irrelevant columns).
+- `DRY_RUN=true`: load config, parse spreadsheet rows, and match
+  birthdays for today, then stop before claiming a send slot in SQLite,
+  rendering the email templates, or calling `EmailProvider.send()` —
+  log `"[DRY RUN] would send birthday email to %s (%s)"` at INFO.
 
 ## 16. Logging
 
