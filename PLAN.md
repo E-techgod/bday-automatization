@@ -579,19 +579,118 @@ covered; no arbitrary coverage percentage gate.
 - **cron**: example line running daily at 08:00 America/Chicago,
   `cd /opt/birthday-automation && /usr/bin/env -S uv run run.py >>
   /var/log/birthday-automation.log 2>&1`.
-- **Docker**: slim `python:3.12-slim` base, install deps, `COPY` app,
+- **Docker**: use `python:3.12-slim` with a small multi-stage build:
+  builder installs `uv` and runs `uv sync --frozen --no-dev
+  --no-install-project` from `pyproject.toml`/`uv.lock`, runtime copies
+  only the built virtualenv plus the runtime files (`app/`, `run.py`, writable
+  `data/` dir) and runs as a non-root user. Keep
   `ENTRYPOINT ["python","run.py"]`, no `CMD` loop — one run per container
   invocation, `.env`/secrets mounted or passed via `--env-file`/orchestrator
   secret injection, never baked into the image.
 - **Cloud**: document Google Cloud Run Jobs (not Cloud Run Service — this
   is a batch job, not a server) + Cloud Scheduler triggering the Job
-  execution daily via the Cloud Run Jobs API/`gcloud run jobs execute`.
-  Credentials via Secret Manager mounted as a file or the service account
-  attached directly to the Job (preferred — no key file needed at all when
-  running on GCP: the Cloud Run Job's attached service account can be used
-  directly by `google.auth.default()` as a fallback when
-  `GOOGLE_CREDENTIALS_FILE` is unset). Note this as an optional enhancement
-  in README, not required for milestone completion.
+  execution daily via the Cloud Run Jobs API/`gcloud run jobs execute`,
+  **noting the SQLite/GCS-FUSE persistence incompatibility above** —
+  Cloud Run Jobs is only a safe target for this app if `STATE_DB_PATH`
+  is backed by something other than Cloud Run's native volume mounts
+  (which are GCS FUSE), so recommend Compute Engine or any similar VM
+  as the primary cloud target instead, per the correction above. GKE
+  with a real block-storage-backed PVC remains a possible option, but it
+  is not equally turnkey here: operators must also handle
+  Kubernetes-specific volume permission setup so the PVC is writable by
+  uid 1000 (for example via `securityContext`/`fsGroup` or an
+  initContainer), which is additional scope not specified in this
+  document.
+  Credentials via Secret Manager mounted as a file (`GOOGLE_CREDENTIALS_FILE`
+  pointing at the mounted secret).
+
+  **Correction (round 4): remove the ADC/keyless-auth claim — it was
+  never implemented and contradicts the shipped code.** This section
+  previously said the Cloud Run Job's attached service account could be
+  used directly via `google.auth.default()` as a fallback when
+  `GOOGLE_CREDENTIALS_FILE` is unset, "as an optional enhancement." That
+  enhancement was never built: `app/config.py` requires
+  `GOOGLE_CREDENTIALS_FILE` to exist on disk (no ADC fallback), and
+  `app/birthday_service.py`'s `_load_google_credentials()` always calls
+  `service_account.Credentials.from_service_account_file(...)`, never
+  `google.auth.default()`. The deployment docs (README, this section)
+  must NOT claim keyless/ADC auth works — a real key file, mounted via
+  Secret Manager (or any secret-injection mechanism), pointed at by
+  `GOOGLE_CREDENTIALS_FILE`, is required in every deployment target
+  documented for this project, cloud included. Implementing genuine ADC
+  support would be new scope beyond this project's spec, not something
+  to silently imply already works.
+
+**Amendment (post-Milestone-8 review) — CRITICAL persistence requirement:**
+`STATE_DB_PATH`'s SQLite ledger is the *only* mechanism preventing
+duplicate birthday emails (§9). A container's local filesystem is
+ephemeral by default on essentially every serverless/batch container
+platform, Cloud Run Jobs included — a fresh execution gets a fresh,
+empty filesystem unless a persistent volume is explicitly attached.
+Deploying this image without persistent storage for `/app/data` (or an
+explicitly-configured `STATE_DB_PATH` elsewhere) silently defeats the
+entire idempotency system: every run looks like the first run, and
+clients can be emailed again on every single execution. This must be
+loud and impossible to miss in both the Dockerfile and the README:
+- **Correction (round 2): a bare host filesystem is NOT the same thing as
+  persistent container storage.** `docker run --rm ...` — even repeated
+  on the exact same long-lived VM/cron host — gets a *fresh, empty*
+  Docker volume backing any `VOLUME`-declared path on every single
+  invocation unless the operator explicitly mounts a bind mount or a
+  named (reused-by-name) volume with `-v`/`--mount`. There is no
+  "persistent host means no action needed" case for Docker — that was
+  wrong. **Every** Docker-based deployment, including a simple
+  cron-triggered `docker run` on an otherwise-persistent VM, MUST pass
+  an explicit persistent mount for `/app/data`, e.g.
+  `docker run --rm -v /opt/birthday-automation/data:/app/data --env-file
+  .env birthday-automation` (bind mount to a real host directory) or
+  `-v birthday-automation-data:/app/data` (a named volume, which *does*
+  persist across separate `docker run` invocations because Docker keeps
+  named volumes by name — unlike the implicit anonymous volume a bare
+  `VOLUME` declaration creates when nothing is explicitly mounted).
+- **Correction (round 3): Cloud Storage FUSE is UNSAFE for this
+  application's state store — do not recommend it, at all.**
+  `app/state/sqlite.py` forces `PRAGMA journal_mode=WAL` and depends on
+  real POSIX file locking (`BEGIN IMMEDIATE`) for the claim/lease
+  protocol that is this project's entire duplicate-send guarantee.
+  Cloud Storage FUSE (Cloud Run's native "Volume mounts" option) is
+  object storage exposed as a filesystem — it does not provide proper
+  file locking, and SQLite's own documentation explicitly warns that
+  WAL mode and reliable locking are not supported on network/FUSE
+  filesystems, with documented corruption risk. Using it here would be
+  worse than not persisting at all: it could silently corrupt the state
+  DB or make the exclusivity guarantee unreliable under concurrent or
+  retried executions — precisely the failure mode §9/§10 were built to
+  prevent. **Cloud Run Jobs' native volume-mount options are not a safe
+  fit for this application's local-SQLite design.** The corrected cloud
+  recommendation: prefer a target with genuine persistent local/block
+  disk and real POSIX locking — primarily a Compute Engine VM (or any
+  VM) running the container via cron/systemd with a normal persistent
+  disk, because that path is fully documented here and reuses the same
+  Docker bind-mount/ownership guidance already specified elsewhere. GKE
+  with a PersistentVolumeClaim backed by a real block-storage disk (not
+  an NFS/object-backed StorageClass) is a possible alternative, but it
+  also needs Kubernetes-specific writable-volume setup for uid 1000
+  (for example `securityContext`/`fsGroup` or an initContainer) beyond
+  what this document covers. If Cloud Run Jobs is still desired for
+  other reasons, that is only safe for this application if
+  `STATE_DB_PATH` is NOT placed on its Cloud Storage FUSE mount — e.g.
+  only for `DRY_RUN=true` testing where no state is ever written, or
+  after replacing the state backend with something FUSE/network-safe
+  (a real managed database), which is out of scope here. The README's
+  Cloud section must state this limitation plainly, not recommend GCS
+  FUSE for `/app/data`.
+- **Volume/mount ownership:** the image runs as a non-root user
+  (`appuser`, pinned to a fixed uid/gid in the Dockerfile so operators
+  can reference it concretely). Every mount example in the README must
+  also show making the host/volume path writable by that uid/gid —
+  e.g. `mkdir -p /opt/birthday-automation/data && chown 1000:1000
+  /opt/birthday-automation/data` before the first `docker run` with a
+  bind mount — since a root-owned (the common default) mount target
+  would make `StateStore`'s SQLite file creation fail before any
+  processing happens. The Dockerfile's `VOLUME /app/data` declaration
+  only documents the expected mount point at the image level — it does
+  not and cannot provide persistence, or correct ownership, by itself.
 
 ## 20. Git Workflow Considerations
 
