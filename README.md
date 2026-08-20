@@ -284,6 +284,7 @@ This overrides the runtime date and lets you test matching behavior without wait
 - `url`: embeds a remote `https://` image URL in the HTML template
 
 The shipped default is `local`, with a real placeholder banner at `app/assets/birthday_banner.jpg`.
+Use Cloudinary to store the image as an url
 
 ## Automated Tests
 
