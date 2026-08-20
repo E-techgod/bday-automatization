@@ -34,6 +34,22 @@ def test_resolve_headers_omits_last_name_when_absent() -> None:
     assert "Last Name" not in resolved
 
 
+def test_resolve_headers_includes_gender_when_present() -> None:
+    config = _build_config()
+
+    resolved = resolve_headers(["Name", "Gender", "Email", "Birthday"], config)
+
+    assert resolved["Gender"] == 1
+
+
+def test_resolve_headers_omits_gender_when_absent() -> None:
+    config = _build_config()
+
+    resolved = resolve_headers(["Name", "Email", "Birthday"], config)
+
+    assert "Gender" not in resolved
+
+
 def _build_config(*, birthday_column: str = "Birthday") -> Config:
     return Config(
         app_timezone="America/Chicago",
@@ -45,6 +61,7 @@ def _build_config(*, birthday_column: str = "Birthday") -> Config:
         google_drive_file_id="test-drive-id",
         name_column="Name",
         last_name_column="Last Name",
+        gender_column="Gender",
         email_column="Email",
         birthday_column=birthday_column,
         last_sent_year_column="Last Birthday Email Year",

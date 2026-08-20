@@ -130,6 +130,125 @@ def test_birthday_email_normalizes_whitespace_in_display_name() -> None:
     assert email_provider.sent_messages[0].to_name == "Test Person"
 
 
+def test_birthday_email_uses_estimada_salutation_for_female_gender() -> None:
+    provider = FakeSpreadsheetProvider(
+        rows=[
+            _row(
+                name="Test Person",
+                email="test.person@example.com",
+                birthday="1/1/2000",
+                gender="Femenino",
+            )
+        ]
+    )
+    email_provider = FakeEmailProvider()
+
+    run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=provider,
+        state_store=FakeStateStore(),
+        email_provider=email_provider,
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert "Estimada" in email_provider.sent_messages[0].html_body
+    assert "Estimado/a" not in email_provider.sent_messages[0].html_body
+
+
+def test_birthday_email_uses_estimado_salutation_for_male_gender() -> None:
+    provider = FakeSpreadsheetProvider(
+        rows=[
+            _row(
+                name="Test Person",
+                email="test.person@example.com",
+                birthday="1/1/2000",
+                gender="Masculino",
+            )
+        ]
+    )
+    email_provider = FakeEmailProvider()
+
+    run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=provider,
+        state_store=FakeStateStore(),
+        email_provider=email_provider,
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    html_body = email_provider.sent_messages[0].html_body
+    assert "Estimado <strong>" in html_body
+    assert "Estimado/a" not in html_body
+
+
+def test_birthday_email_defaults_salutation_when_gender_missing() -> None:
+    provider = FakeSpreadsheetProvider(
+        rows=[
+            _row(
+                name="Test Person",
+                email="test.person@example.com",
+                birthday="1/1/2000",
+            )
+        ]
+    )
+    email_provider = FakeEmailProvider()
+
+    run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=provider,
+        state_store=FakeStateStore(),
+        email_provider=email_provider,
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert "Estimado/a" in email_provider.sent_messages[0].html_body
+
+
+def test_birthday_email_defaults_salutation_when_gender_unknown() -> None:
+    provider = FakeSpreadsheetProvider(
+        rows=[
+            _row(
+                name="Test Person",
+                email="test.person@example.com",
+                birthday="1/1/2000",
+                gender="Nonbinary",
+            )
+        ]
+    )
+    email_provider = FakeEmailProvider()
+
+    run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=provider,
+        state_store=FakeStateStore(),
+        email_provider=email_provider,
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert "Estimado/a" in email_provider.sent_messages[0].html_body
+
+
+def test_invalid_gender_value_does_not_invalidate_row() -> None:
+    summary = run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="Test Person",
+                    email="test.person@example.com",
+                    birthday="1/1/2000",
+                    gender=12345,
+                )
+            ]
+        ),
+        state_store=FakeStateStore(),
+        email_provider=FakeEmailProvider(),
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert summary == Summary(inspected=1, matched=1, sent=1)
+
+
 def test_no_birthday_today_has_clean_zero_send_summary() -> None:
     summary = run_birthday_job(
         _build_config(),
@@ -1426,6 +1545,7 @@ def _build_config(
         google_drive_file_id="synthetic-drive-id",
         name_column="Name",
         last_name_column="Last Name",
+        gender_column="Gender",
         email_column="Email",
         birthday_column="Birthday",
         last_sent_year_column="Last Birthday Email Year",
@@ -1457,6 +1577,7 @@ def _row(
     email: str,
     birthday: object,
     last_name: object = None,
+    gender: object = None,
 ) -> dict[str, object]:
     row: dict[str, object] = {
         "Name": name,
@@ -1465,6 +1586,8 @@ def _row(
     }
     if last_name is not None:
         row["Last Name"] = last_name
+    if gender is not None:
+        row["Gender"] = gender
     return row
 
 

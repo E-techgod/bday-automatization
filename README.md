@@ -104,6 +104,7 @@ The app resolves these logical columns from the header row:
 - `EMAIL_COLUMN` required
 - `BIRTHDAY_COLUMN` required
 - `LAST_SENT_YEAR_COLUMN` optional, informational only
+- `GENDER_COLUMN` optional, used only to pick a Spanish salutation
 
 `LAST_SENT_YEAR_COLUMN` is never the duplicate-send source of truth. The SQLite database is.
 
@@ -170,6 +171,7 @@ Copy `.env.example` to `.env` and fill in every required value for your deployme
 | `EMAIL_COLUMN` | `Email` | Logical column header for recipient email | Always | Same header normalization rules |
 | `BIRTHDAY_COLUMN` | `Birthday` | Logical column header for birthday values | Always | Same header normalization rules |
 | `LAST_SENT_YEAR_COLUMN` | `Last Birthday Email Year` | Optional informational column from the spreadsheet | Always | Not used for idempotency gating or writes |
+| `GENDER_COLUMN` | `Gender` | Optional column used to pick a gender-aware Spanish salutation | Always | Missing or unrecognized values fall back to `Estimado/a`; never invalidates a row |
 | `EMAIL_PROVIDER` | `gmail` | Email provider selector | Always | Must be `gmail` |
 | `EMAIL_FROM_NAME` | empty | Display name in the `From:` header and template signature | Optional | Can be blank |
 | `EMAIL_FROM_ADDRESS` | empty | Sender mailbox address | Always | Must look like an email address or startup fails |
@@ -208,6 +210,7 @@ NAME_COLUMN=Name
 EMAIL_COLUMN=Email
 BIRTHDAY_COLUMN=Birthday
 LAST_SENT_YEAR_COLUMN=Last Birthday Email Year
+GENDER_COLUMN=Gender
 
 EMAIL_PROVIDER=gmail
 EMAIL_FROM_NAME=

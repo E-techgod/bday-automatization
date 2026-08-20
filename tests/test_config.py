@@ -46,6 +46,30 @@ def test_load_config_valid_xlsx_drive_mode(
     assert config.google_drive_file_id == "drive-123"
 
 
+def test_load_config_gender_column_defaults_to_gender(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.delenv("GENDER_COLUMN", raising=False)
+
+    config = load_config()
+
+    assert config.gender_column == "Gender"
+
+
+def test_load_config_gender_column_uses_configured_value(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.setenv("GENDER_COLUMN", "Género")
+
+    config = load_config()
+
+    assert config.gender_column == "Género"
+
+
 @pytest.mark.parametrize(
     ("mode", "missing_var"),
     [
@@ -601,6 +625,7 @@ def _set_base_env(
         "GOOGLE_DRIVE_FILE_ID": "drive-123",
         "NAME_COLUMN": "Name",
         "LAST_NAME_COLUMN": "Last Name",
+        "GENDER_COLUMN": "Gender",
         "EMAIL_COLUMN": "Email",
         "BIRTHDAY_COLUMN": "Birthday",
         "LAST_SENT_YEAR_COLUMN": "Last Birthday Email Year",

@@ -363,6 +363,7 @@ def _build_config() -> Config:
         google_drive_file_id="test-drive-id",
         name_column="Name",
         last_name_column="Last Name",
+        gender_column="Gender",
         email_column="Email",
         birthday_column="Birthday",
         last_sent_year_column="Last Birthday Email Year",

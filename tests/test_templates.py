@@ -65,7 +65,24 @@ def test_birthday_templates_render_none_image_mode() -> None:
     assert image_url not in text_output
 
 
-def _render_template(template_name: str, *, image_mode: str, image_url: str) -> str:
+def test_birthday_html_template_renders_salutation() -> None:
+    html_output = _render_template(
+        "birthday_email.html",
+        image_mode="none",
+        image_url="",
+        salutation="Estimada",
+    )
+
+    assert "<p style=\"font-size: 16px; margin: 0 0 16px 0;\">Estimada <strong>Test Person</strong>,</p>" in html_output
+
+
+def _render_template(
+    template_name: str,
+    *,
+    image_mode: str,
+    image_url: str,
+    salutation: str = "Estimado/a",
+) -> str:
     template_env = Environment(
         loader=FileSystemLoader("app/templates"),
         autoescape=select_autoescape(["html", "xml"]),
@@ -73,6 +90,7 @@ def _render_template(template_name: str, *, image_mode: str, image_url: str) -> 
     template = template_env.get_template(template_name)
     return template.render(
         name="Test Person",
+        salutation=salutation,
         image_mode=image_mode,
         image_alt="Happy Birthday banner",
         image_width=600,

@@ -263,6 +263,7 @@ def _parse_client_row(
         row_index=row_index,
         last_sent_year=_parse_last_sent_year(row.get(config.last_sent_year_column)),
         last_name=_parse_name(row.get(config.last_name_column)),
+        gender=_parse_gender(row.get(config.gender_column)),
     )
 
 
@@ -273,6 +274,15 @@ def _parse_name(raw: object) -> str | None:
     if not name:
         return None
     return name
+
+
+def _parse_gender(raw: object) -> str | None:
+    if not isinstance(raw, str):
+        return None
+    gender = raw.strip()
+    if not gender:
+        return None
+    return gender
 
 
 def _parse_email(raw: object) -> str | None:
@@ -438,6 +448,7 @@ def _render_message(
 ) -> EmailMessage:
     template_context = {
         "name": client.display_name,
+        "salutation": client.salutation,
         "image_mode": config.birthday_image_mode,
         "image_alt": config.birthday_image_alt,
         "image_width": config.birthday_image_width,

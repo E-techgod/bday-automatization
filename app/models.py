@@ -16,6 +16,29 @@ def _normalize_name_part(value: str) -> str:
     return " ".join(value.split())
 
 
+_FEMALE_GENDER_VALUES = frozenset({"mujer", "femenino", "f", "female"})
+_MALE_GENDER_VALUES = frozenset({"hombre", "masculino", "m", "male"})
+_DEFAULT_SALUTATION = "Estimado/a"
+_FEMALE_SALUTATION = "Estimada"
+_MALE_SALUTATION = "Estimado"
+
+
+def normalize_gender(gender: str | None) -> str | None:
+    if gender is None:
+        return None
+    normalized = gender.strip().casefold()
+    return normalized or None
+
+
+def resolve_salutation(gender: str | None) -> str:
+    normalized = normalize_gender(gender)
+    if normalized in _FEMALE_GENDER_VALUES:
+        return _FEMALE_SALUTATION
+    if normalized in _MALE_GENDER_VALUES:
+        return _MALE_SALUTATION
+    return _DEFAULT_SALUTATION
+
+
 @dataclass(frozen=True)
 class Client:
     name: str
@@ -24,10 +47,15 @@ class Client:
     row_index: int
     last_sent_year: int | None = None
     last_name: str | None = None
+    gender: str | None = None
 
     @property
     def display_name(self) -> str:
         return build_display_name(self.name, self.last_name)
+
+    @property
+    def salutation(self) -> str:
+        return resolve_salutation(self.gender)
 
 
 @dataclass(frozen=True)

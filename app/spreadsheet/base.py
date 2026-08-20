@@ -53,6 +53,12 @@ def resolve_headers(raw_header_row: list[str], config: Config) -> dict[str, int]
     if optional_last_name_index is not None:
         resolved[config.last_name_column] = optional_last_name_index
 
+    optional_gender_index = normalized_headers.get(
+        _normalize_header(config.gender_column)
+    )
+    if optional_gender_index is not None:
+        resolved[config.gender_column] = optional_gender_index
+
     return resolved
 
 
@@ -87,6 +93,8 @@ def _validate_distinct_configured_headers(config: Config) -> None:
         configured_headers.append(config.last_sent_year_column)
     if _normalize_header(config.last_name_column):
         configured_headers.append(config.last_name_column)
+    if _normalize_header(config.gender_column):
+        configured_headers.append(config.gender_column)
 
     seen_by_normalized: dict[str, str] = {}
     for configured_header in configured_headers:
