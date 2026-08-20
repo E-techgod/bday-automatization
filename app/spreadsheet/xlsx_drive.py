@@ -66,6 +66,8 @@ class XlsxDriveProvider(SpreadsheetProvider):
             ) from exc
         try:
             worksheet = workbook.worksheets[0]
+            print("WORKBOOK SHEETS:", workbook.sheetnames)
+            print("SELECTED SHEET:", workbook.worksheets[0].title)
             row_iterator = worksheet.iter_rows(values_only=True)
             try:
                 raw_header_row = next(row_iterator)
@@ -74,6 +76,8 @@ class XlsxDriveProvider(SpreadsheetProvider):
 
             header_row = ["" if cell is None else str(cell) for cell in raw_header_row]
             resolved_headers = resolve_headers(header_row, self._config)
+            print("RAW HEADERS:", header_row)
+            print("RESOLVED HEADERS:", resolved_headers)
             return [
                 build_row_dict(list(raw_row), resolved_headers)
                 for raw_row in row_iterator
