@@ -8,6 +8,7 @@ import pytest
 import app.config as config_module
 from app.config import (
     _DEFAULT_BIRTHDAY_IMAGE_PATH,
+    _DEFAULT_GOOGLE_OAUTH_TOKEN_PATH,
     _DEFAULT_STATE_DB_PATH,
     ConfigError,
     load_config,
@@ -232,6 +233,114 @@ def test_load_config_missing_google_credentials_file_raises(
 
     with pytest.raises(ConfigError):
         load_config()
+
+
+def test_load_config_defaults_to_service_account_auth_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.delenv("GOOGLE_AUTH_MODE", raising=False)
+
+    config = load_config()
+
+    assert config.google_auth_mode == "service_account"
+    assert config.google_credentials_file == credentials_path
+    assert config.google_oauth_client_secrets_file is None
+
+
+def test_load_config_invalid_google_auth_mode_raises(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.setenv("GOOGLE_AUTH_MODE", "api_key")
+
+    with pytest.raises(
+        ConfigError,
+        match="GOOGLE_AUTH_MODE must be 'service_account' or 'oauth'",
+    ):
+        load_config()
+
+
+def test_load_config_oauth_mode_requires_client_secrets_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.setenv("GOOGLE_AUTH_MODE", "oauth")
+    monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_SECRETS_FILE", raising=False)
+
+    with pytest.raises(ConfigError):
+        load_config()
+
+
+def test_load_config_oauth_mode_does_not_require_credentials_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.setenv("GOOGLE_AUTH_MODE", "oauth")
+    monkeypatch.delenv("GOOGLE_CREDENTIALS_FILE", raising=False)
+    client_secrets_path = tmp_path / "client-secrets.json"
+    client_secrets_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_CLIENT_SECRETS_FILE", str(client_secrets_path)
+    )
+
+    config = load_config()
+
+    assert config.google_auth_mode == "oauth"
+    assert config.google_credentials_file is None
+    assert config.google_oauth_client_secrets_file == client_secrets_path
+
+
+def test_load_config_oauth_mode_missing_client_secrets_file_raises(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.setenv("GOOGLE_AUTH_MODE", "oauth")
+    missing_client_secrets = tmp_path / "missing-client-secrets.json"
+    monkeypatch.setenv(
+        "GOOGLE_OAUTH_CLIENT_SECRETS_FILE", str(missing_client_secrets)
+    )
+
+    with pytest.raises(ConfigError):
+        load_config()
+
+
+def test_load_config_default_google_oauth_token_path_is_independent_of_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.delenv("GOOGLE_OAUTH_TOKEN_FILE", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    config = load_config()
+
+    assert config.google_oauth_token_file == _DEFAULT_GOOGLE_OAUTH_TOKEN_PATH
+
+
+def test_load_config_relative_google_oauth_token_path_is_independent_of_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.setenv("GOOGLE_OAUTH_TOKEN_FILE", "data/google_oauth_token.json")
+    monkeypatch.chdir(tmp_path)
+
+    config = load_config()
+
+    assert config.google_oauth_token_file == _DEFAULT_GOOGLE_OAUTH_TOKEN_PATH
 
 
 def test_load_config_succeeds_with_real_env_example_defaults(

@@ -7,7 +7,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from google.auth.transport.requests import (  # type: ignore[import-untyped]
+    Request as GoogleAuthRequest,
+)
 from google.oauth2 import service_account  # type: ignore[import-untyped]
+from google.oauth2.credentials import (  # type: ignore[import-untyped]
+    Credentials as GoogleOAuthCredentials,
+)
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.birthday_rules import Clock, build_clock, is_birthday_today, parse_birthday
@@ -31,6 +37,10 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 _SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly"
 _DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+# OAuth mode requests the union of scopes up front (one interactive consent,
+# one cached token) rather than the narrower per-call scope used for service
+# accounts, since an installed-app flow can't silently re-consent mid-run.
+_OAUTH_SCOPES = [_GMAIL_SCOPE, _SHEETS_SCOPE, _DRIVE_SCOPE]
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 _UNSET = object()
 
@@ -121,19 +131,59 @@ def build_spreadsheet_provider(
 def build_email_provider(
     config: Config, credentials: Any | None = None
 ) -> EmailProvider:
-    effective_credentials = credentials or _load_google_credentials(
-        config, [_GMAIL_SCOPE]
-    ).with_subject(config.google_impersonate_subject)
+    effective_credentials = credentials or _build_gmail_credentials(config)
     if config.email_provider != "gmail":
         raise ValueError(f"Unsupported email provider: {config.email_provider}")
     return GmailProvider.from_credentials(config, effective_credentials)
 
 
+def _build_gmail_credentials(config: Config) -> Any:
+    credentials = _load_google_credentials(config, [_GMAIL_SCOPE])
+    # Domain-wide delegation (with_subject) is a service-account-only feature;
+    # an OAuth user credential already represents the consenting user.
+    if config.google_auth_mode == "service_account":
+        return credentials.with_subject(config.google_impersonate_subject)
+    return credentials
+
+
 def _load_google_credentials(config: Config, scopes: list[str]) -> Any:
+    if config.google_auth_mode == "oauth":
+        return _load_oauth_user_credentials(config)
     return service_account.Credentials.from_service_account_file(
         str(config.google_credentials_file),
         scopes=scopes,
     )
+
+
+def _load_oauth_user_credentials(config: Config) -> Any:
+    try:
+        from google_auth_oauthlib.flow import (  # type: ignore[import-untyped]
+            InstalledAppFlow,
+        )
+    except ImportError as exc:
+        raise RuntimeError(
+            "GOOGLE_AUTH_MODE=oauth requires the 'google-auth-oauthlib' package; "
+            "install the project's dev dependencies to use it locally"
+        ) from exc
+
+    token_path = config.google_oauth_token_file
+    credentials: GoogleOAuthCredentials | None = None
+    if token_path.is_file():
+        credentials = GoogleOAuthCredentials.from_authorized_user_file(
+            str(token_path), _OAUTH_SCOPES
+        )
+
+    if credentials and credentials.expired and credentials.refresh_token:
+        credentials.refresh(GoogleAuthRequest())
+    elif not credentials or not credentials.valid:
+        flow = InstalledAppFlow.from_client_secrets_file(
+            str(config.google_oauth_client_secrets_file), _OAUTH_SCOPES
+        )
+        credentials = flow.run_local_server(port=0)
+
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text(credentials.to_json(), encoding="utf-8")
+    return credentials
 
 
 def _build_email_provider_accessor(

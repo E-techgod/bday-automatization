@@ -36,7 +36,12 @@ Then fill in `.env` with your real values.
 
 ## Google Cloud Configuration
 
-This project always uses a Google Cloud service account JSON key file referenced by `GOOGLE_CREDENTIALS_FILE`. Application Default Credentials / keyless auth are not implemented.
+This project authenticates to Google APIs in one of two modes, selected by `GOOGLE_AUTH_MODE`:
+
+- `service_account` (default) — a Google Cloud service account JSON key file referenced by `GOOGLE_CREDENTIALS_FILE`. This is the mode used for every deployment target described below.
+- `oauth` — an interactive user consent flow, intended for local testing only (it opens a browser and a local server, so it does not run in Docker/cron/cloud deployments). See [Local testing with OAuth](#local-testing-with-oauth) below.
+
+Application Default Credentials / keyless auth are not implemented.
 
 ### 1. Create a service account and JSON key
 
@@ -110,6 +115,29 @@ Accepted birthday values:
 - ISO `YYYY-MM-DD`
 - `"Month DD, YYYY"` such as `May 27, 2003`
 
+### Local testing with OAuth
+
+As an alternative to a service account, you can authenticate as your own Google user for local testing:
+
+1. In the same Google Cloud project, create an OAuth client ID of type "Desktop app" and download its JSON file.
+2. Set the following instead of `GOOGLE_CREDENTIALS_FILE`:
+
+   ```env
+   GOOGLE_AUTH_MODE=oauth
+   GOOGLE_OAUTH_CLIENT_SECRETS_FILE=secrets/your-oauth-client.json
+   GOOGLE_OAUTH_TOKEN_FILE=data/google_oauth_token.json
+   ```
+
+3. Install the OAuth dev dependency (`uv sync` picks it up automatically since it's in the `dev` dependency group).
+4. Run the app. The first run opens a browser for consent and caches the resulting token at `GOOGLE_OAUTH_TOKEN_FILE`; later runs reuse (and silently refresh) that cached token.
+
+Notes:
+
+- With your own Google account, no sharing step is needed for files you already own — read access follows your normal Drive/Sheets permissions.
+- Gmail sends as your own mailbox. `GOOGLE_IMPERSONATE_SUBJECT` and domain-wide delegation (below) do not apply in `oauth` mode.
+- The cached token file contains a live credential; it is already covered by `.gitignore` (`*token*.json`) and must never be committed.
+- This mode is not supported in the Docker image or any unattended/cron deployment — use `service_account` there.
+
 ## Gmail Authorization
 
 Gmail sending requires a second setup step in Google Workspace Admin, separate from sharing the sheet or Drive file.
@@ -146,8 +174,11 @@ Copy `.env.example` to `.env` and fill in every required value for your deployme
 | `EMAIL_FROM_NAME` | empty | Display name in the `From:` header and template signature | Optional | Can be blank |
 | `EMAIL_FROM_ADDRESS` | empty | Sender mailbox address | Always | Must look like an email address or startup fails |
 | `EMAIL_SUBJECT_TEMPLATE` | `Happy Birthday, {{name}}! 🎉` | Jinja2 subject template | Always | Rendered with `name` |
-| `GOOGLE_CREDENTIALS_FILE` | empty | Service account JSON key file path | Always | File must exist at startup |
-| `GOOGLE_IMPERSONATE_SUBJECT` | empty | Gmail impersonation subject | Optional | Must be an email if set; defaults to `EMAIL_FROM_ADDRESS` if blank |
+| `GOOGLE_AUTH_MODE` | `service_account` | Selects the Google auth mode | Always | Must be `service_account` or `oauth` |
+| `GOOGLE_CREDENTIALS_FILE` | empty | Service account JSON key file path | Required when `GOOGLE_AUTH_MODE=service_account` | File must exist at startup |
+| `GOOGLE_IMPERSONATE_SUBJECT` | empty | Gmail impersonation subject (service account mode only) | Optional | Must be an email if set; defaults to `EMAIL_FROM_ADDRESS` if blank |
+| `GOOGLE_OAUTH_CLIENT_SECRETS_FILE` | empty | OAuth "Desktop app" client JSON path | Required when `GOOGLE_AUTH_MODE=oauth` | File must exist at startup |
+| `GOOGLE_OAUTH_TOKEN_FILE` | `data/google_oauth_token.json` | Cached OAuth user token path | Used only when `GOOGLE_AUTH_MODE=oauth` | Relative to project root; created on first interactive consent |
 | `BIRTHDAY_IMAGE_MODE` | `local` | Controls birthday image handling | Always | Must be `none`, `local`, or `url` |
 | `BIRTHDAY_IMAGE_PATH` | `app/assets/birthday_banner.jpg` | Local inline image file path | Required when `BIRTHDAY_IMAGE_MODE=local` | File must exist at startup |
 | `BIRTHDAY_IMAGE_URL` | empty | Remote image URL for email template | Required when `BIRTHDAY_IMAGE_MODE=url` | Must be an `https://` URL |
@@ -183,8 +214,13 @@ EMAIL_FROM_NAME=
 EMAIL_FROM_ADDRESS=
 EMAIL_SUBJECT_TEMPLATE=Happy Birthday, {{name}}! 🎉
 
+GOOGLE_AUTH_MODE=service_account
+
 GOOGLE_CREDENTIALS_FILE=
 GOOGLE_IMPERSONATE_SUBJECT=
+
+GOOGLE_OAUTH_CLIENT_SECRETS_FILE=
+GOOGLE_OAUTH_TOKEN_FILE=data/google_oauth_token.json
 
 BIRTHDAY_IMAGE_MODE=local
 BIRTHDAY_IMAGE_PATH=app/assets/birthday_banner.jpg

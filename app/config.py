@@ -38,12 +38,14 @@ except ImportError:
 SpreadsheetMode = Literal["google_sheet", "xlsx_drive"]
 BirthdayImageMode = Literal["none", "local", "url"]
 EmailProvider = Literal["gmail"]
+GoogleAuthMode = Literal["service_account", "oauth"]
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _TEST_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_BIRTHDAY_IMAGE_PATH = _PROJECT_ROOT / "app/assets/birthday_banner.jpg"
 _DEFAULT_STATE_DB_PATH = _PROJECT_ROOT / "data/birthday_state.db"
+_DEFAULT_GOOGLE_OAUTH_TOKEN_PATH = _PROJECT_ROOT / "data/google_oauth_token.json"
 
 
 class ConfigError(ValueError):
@@ -67,8 +69,11 @@ class Config:
     email_from_name: str
     email_from_address: str
     email_subject_template: str
-    google_credentials_file: Path
+    google_auth_mode: GoogleAuthMode
+    google_credentials_file: Path | None
     google_impersonate_subject: str
+    google_oauth_client_secrets_file: Path | None
+    google_oauth_token_file: Path
     birthday_image_mode: BirthdayImageMode
     birthday_image_path: Path
     birthday_image_url: str
@@ -92,10 +97,13 @@ def load_config() -> Config:
     test_date = _parse_test_date(_get_env("TEST_DATE", ""))
     email_provider = _parse_email_provider(_get_env("EMAIL_PROVIDER", "gmail"))
     email_from_address = _parse_email(_get_env("EMAIL_FROM_ADDRESS"))
-    google_credentials_file = _parse_existing_path(
-        "GOOGLE_CREDENTIALS_FILE",
-        _get_env("GOOGLE_CREDENTIALS_FILE"),
+    google_auth_mode = _parse_google_auth_mode(
+        _get_env("GOOGLE_AUTH_MODE", "service_account")
     )
+    google_credentials_file, google_oauth_client_secrets_file = (
+        _load_google_auth_files(google_auth_mode)
+    )
+    google_oauth_token_file = _load_google_oauth_token_path()
     birthday_image_mode = _parse_image_mode(_get_env("BIRTHDAY_IMAGE_MODE", "local"))
     birthday_image_path = _load_birthday_image_path()
     birthday_image_url = _get_env("BIRTHDAY_IMAGE_URL", "")
@@ -138,8 +146,11 @@ def load_config() -> Config:
         email_subject_template=_get_env(
             "EMAIL_SUBJECT_TEMPLATE", "Happy Birthday, {{name}}! 🎉"
         ),
+        google_auth_mode=google_auth_mode,
         google_credentials_file=google_credentials_file,
         google_impersonate_subject=google_impersonate_subject,
+        google_oauth_client_secrets_file=google_oauth_client_secrets_file,
+        google_oauth_token_file=google_oauth_token_file,
         birthday_image_mode=birthday_image_mode,
         birthday_image_path=birthday_image_path,
         birthday_image_url=birthday_image_url,
@@ -183,6 +194,13 @@ def _load_state_db_path() -> Path:
     return _resolve_project_relative_path(configured_path)
 
 
+def _load_google_oauth_token_path() -> Path:
+    configured_path = os.environ.get("GOOGLE_OAUTH_TOKEN_FILE")
+    if configured_path is None:
+        return _DEFAULT_GOOGLE_OAUTH_TOKEN_PATH
+    return _resolve_project_relative_path(configured_path)
+
+
 def _parse_bool(name: str, value: str) -> bool:
     normalized = value.strip().casefold()
     if normalized == "true":
@@ -219,6 +237,32 @@ def _parse_image_mode(value: str) -> BirthdayImageMode:
     if value == "url":
         return "url"
     raise ConfigError("BIRTHDAY_IMAGE_MODE must be 'none', 'local', or 'url'")
+
+
+def _parse_google_auth_mode(value: str) -> GoogleAuthMode:
+    normalized = value.strip().casefold()
+    if normalized == "service_account":
+        return "service_account"
+    if normalized == "oauth":
+        return "oauth"
+    raise ConfigError("GOOGLE_AUTH_MODE must be 'service_account' or 'oauth'")
+
+
+def _load_google_auth_files(
+    google_auth_mode: GoogleAuthMode,
+) -> tuple[Path | None, Path | None]:
+    if google_auth_mode == "oauth":
+        oauth_client_secrets_file = _parse_existing_path(
+            "GOOGLE_OAUTH_CLIENT_SECRETS_FILE",
+            _get_env("GOOGLE_OAUTH_CLIENT_SECRETS_FILE"),
+        )
+        return None, oauth_client_secrets_file
+
+    credentials_file = _parse_existing_path(
+        "GOOGLE_CREDENTIALS_FILE",
+        _get_env("GOOGLE_CREDENTIALS_FILE"),
+    )
+    return credentials_file, None
 
 
 def _parse_email_provider(value: str) -> EmailProvider:
