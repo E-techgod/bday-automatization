@@ -21,4 +21,4 @@ secrets/
 .env
 .DS_Store
 graphify-out/
-
+PLAN.md
