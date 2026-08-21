@@ -66,8 +66,8 @@ class XlsxDriveProvider(SpreadsheetProvider):
             ) from exc
         try:
             worksheet = workbook.worksheets[0]
-            print("WORKBOOK SHEETS:", workbook.sheetnames)
-            print("SELECTED SHEET:", workbook.worksheets[0].title)
+            # print("WORKBOOK SHEETS:", workbook.sheetnames)
+            # print("SELECTED SHEET:", workbook.worksheets[0].title)
             row_iterator = worksheet.iter_rows(values_only=True)
             try:
                 raw_header_row = next(row_iterator)
@@ -84,14 +84,10 @@ class XlsxDriveProvider(SpreadsheetProvider):
             ]
 
             #print("FIRST 5 PARSED ROWS:")
-            for row in rows[:5]:
-                print(row)
+            #for row in rows[:5]:
+                #print(row)
 
             return rows
-            return [
-                build_row_dict(list(raw_row), resolved_headers)
-                for raw_row in row_iterator
-            ]
         finally:
             workbook.close()
 
