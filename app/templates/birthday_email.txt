@@ -1,4 +1,4 @@
-Happy Birthday, {{ name }}! 🎉
+Feliz cumpleaños, {{ name }}! 🎉
 
 Hi {{ name }},
 

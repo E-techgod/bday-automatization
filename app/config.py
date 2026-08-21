@@ -9,6 +9,7 @@ from typing import IO, Literal
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
+EMAIL_SUBJECT_TEMPLATE= "EMAIL_SUBJECT_TEMPLATE", "Feliz cumpleaños, {{name}}! 🎉"
 try:
     from dotenv import load_dotenv
 except ImportError:
@@ -147,9 +148,7 @@ def load_config() -> Config:
         email_provider=email_provider,
         email_from_name=_get_env("EMAIL_FROM_NAME", ""),
         email_from_address=email_from_address,
-        email_subject_template=_get_env(
-            "EMAIL_SUBJECT_TEMPLATE", "Happy Birthday, {{name}}! 🎉"
-        ),
+        email_subject_template = _get_env(*EMAIL_SUBJECT_TEMPLATE),
         google_auth_mode=google_auth_mode,
         google_credentials_file=google_credentials_file,
         google_impersonate_subject=google_impersonate_subject,
