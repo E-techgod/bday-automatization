@@ -175,7 +175,7 @@ Copy `.env.example` to `.env` and fill in every required value for your deployme
 | `EMAIL_PROVIDER` | `gmail` | Email provider selector | Always | Must be `gmail` |
 | `EMAIL_FROM_NAME` | empty | Display name in the `From:` header and template signature | Optional | Can be blank |
 | `EMAIL_FROM_ADDRESS` | empty | Sender mailbox address | Always | Must look like an email address or startup fails |
-| `EMAIL_SUBJECT_TEMPLATE` | `Happy Birthday, {{name}}! 🎉` | Jinja2 subject template | Always | Rendered with `name` |
+| `EMAIL_SUBJECT_TEMPLATE` | `Feliz Cumpleaños {{name}}! 🎉` | Jinja2 subject template | Always | Rendered with `name` |
 | `GOOGLE_AUTH_MODE` | `service_account` | Selects the Google auth mode | Always | Must be `service_account` or `oauth` |
 | `GOOGLE_CREDENTIALS_FILE` | empty | Service account JSON key file path | Required when `GOOGLE_AUTH_MODE=service_account` | File must exist at startup |
 | `GOOGLE_IMPERSONATE_SUBJECT` | empty | Gmail impersonation subject (service account mode only) | Optional | Must be an email if set; defaults to `EMAIL_FROM_ADDRESS` if blank |
