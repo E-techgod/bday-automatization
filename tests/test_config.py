@@ -381,6 +381,7 @@ def test_load_config_succeeds_with_real_env_example_defaults(
     env_vars.update(
         {
             "GOOGLE_SHEET_ID": "sheet-123",
+            "GOOGLE_DRIVE_FILE_ID": "drive-123",
             "EMAIL_FROM_ADDRESS": "sender@example.com",
             "GOOGLE_CREDENTIALS_FILE": str(credentials_path),
         }
@@ -411,6 +412,7 @@ def test_load_config_default_birthday_image_path_is_independent_of_cwd(
     env_vars.update(
         {
             "GOOGLE_SHEET_ID": "sheet-123",
+            "GOOGLE_DRIVE_FILE_ID": "drive-123",
             "EMAIL_FROM_ADDRESS": "sender@example.com",
             "GOOGLE_CREDENTIALS_FILE": str(credentials_path),
         }
@@ -443,6 +445,7 @@ def test_load_config_relative_birthday_image_path_is_independent_of_cwd(
     env_vars.update(
         {
             "GOOGLE_SHEET_ID": "sheet-123",
+            "GOOGLE_DRIVE_FILE_ID": "drive-123",
             "EMAIL_FROM_ADDRESS": "sender@example.com",
             "GOOGLE_CREDENTIALS_FILE": str(credentials_path),
             "BIRTHDAY_IMAGE_PATH": "app/assets/birthday_banner.jpg",
@@ -475,6 +478,7 @@ def test_load_config_default_state_db_path_is_independent_of_cwd(
     env_vars.update(
         {
             "GOOGLE_SHEET_ID": "sheet-123",
+            "GOOGLE_DRIVE_FILE_ID": "drive-123",
             "EMAIL_FROM_ADDRESS": "sender@example.com",
             "GOOGLE_CREDENTIALS_FILE": str(credentials_path),
         }
@@ -506,6 +510,7 @@ def test_load_config_relative_state_db_path_is_independent_of_cwd(
     env_vars.update(
         {
             "GOOGLE_SHEET_ID": "sheet-123",
+            "GOOGLE_DRIVE_FILE_ID": "drive-123",
             "EMAIL_FROM_ADDRESS": "sender@example.com",
             "GOOGLE_CREDENTIALS_FILE": str(credentials_path),
             "STATE_DB_PATH": "data/birthday_state.db",
@@ -540,6 +545,7 @@ def test_load_config_relative_google_credentials_file_is_independent_of_cwd(
     env_vars.update(
         {
             "GOOGLE_SHEET_ID": "sheet-123",
+            "GOOGLE_DRIVE_FILE_ID": "drive-123",
             "EMAIL_FROM_ADDRESS": "sender@example.com",
             "GOOGLE_CREDENTIALS_FILE": "config/google-credentials.json",
             "BIRTHDAY_IMAGE_MODE": "none",
@@ -571,6 +577,7 @@ def test_load_config_absolute_google_credentials_file_is_independent_of_cwd(
     env_vars.update(
         {
             "GOOGLE_SHEET_ID": "sheet-123",
+            "GOOGLE_DRIVE_FILE_ID": "drive-123",
             "EMAIL_FROM_ADDRESS": "sender@example.com",
             "GOOGLE_CREDENTIALS_FILE": str(credentials_path),
         }
@@ -632,7 +639,7 @@ def _set_base_env(
         "EMAIL_PROVIDER": "gmail",
         "EMAIL_FROM_NAME": "Sender Name",
         "EMAIL_FROM_ADDRESS": "sender@example.com",
-        "EMAIL_SUBJECT_TEMPLATE": "Happy Birthday, {{name}}! 🎉",
+        "EMAIL_SUBJECT_TEMPLATE": "Feliz cumpleaños, {{name}}! 🎉",
         "GOOGLE_CREDENTIALS_FILE": str(credentials_path),
         "GOOGLE_IMPERSONATE_SUBJECT": "",
         "BIRTHDAY_IMAGE_MODE": "local",

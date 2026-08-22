@@ -26,7 +26,7 @@ def test_gmail_send_builds_expected_related_mime_message() -> None:
 
     assert parsed_message["From"] == "Example Sender <sender@example.com>"
     assert parsed_message["To"] == "Test Person <test.person@example.com>"
-    assert parsed_message["Subject"] == "Happy Birthday, Test Person! 🎉"
+    assert parsed_message["Subject"] == "Feliz cumpleaños, Test Person! 🎉"
     assert parsed_message.get_content_subtype() == "related"
 
     related_parts = parsed_message.get_payload()
@@ -40,7 +40,7 @@ def test_gmail_send_builds_expected_related_mime_message() -> None:
         "plain",
         "html",
     ]
-    assert "Happy Birthday, Test Person! 🎉" in alternative_payload[0].get_content()
+    assert "Feliz cumpleaños, Test Person! 🎉" in alternative_payload[0].get_content()
     assert "Hi Test Person," in alternative_payload[0].get_content()
     assert "cid:birthday_banner" in alternative_payload[1].get_content()
 
@@ -247,7 +247,7 @@ def _build_config() -> Config:
         email_provider="gmail",
         email_from_name="Example Sender",
         email_from_address="sender@example.com",
-        email_subject_template="Happy Birthday, {{name}}! 🎉",
+        email_subject_template="Feliz cumpleaños, {{name}}! 🎉",
         google_auth_mode="service_account",
         google_credentials_file=Path("synthetic-credentials.json"),
         google_impersonate_subject="sender@example.com",
@@ -298,7 +298,7 @@ def _build_message(
         to_name="Test Person",
         from_name="Example Sender",
         from_address="sender@example.com",
-        subject="Happy Birthday, Test Person! 🎉",
+        subject="Feliz cumpleaños, Test Person! 🎉",
         html_body=html_body,
         text_body=text_body,
         inline_image=inline_image,

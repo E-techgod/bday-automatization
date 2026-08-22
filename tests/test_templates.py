@@ -15,10 +15,12 @@ def test_birthday_templates_render_local_image_mode() -> None:
         image_url="https://assets.example.com/birthday-banner.jpg",
     )
 
-    assert "Happy Birthday, Test Person! 🎉" in html_output
-    assert "Hi Test Person," in html_output
+    assert 'lang="es"' in html_output
+    assert "Estimado/a <strong>Test Person</strong>" in html_output
     assert 'src="cid:birthday_banner"' in html_output
-    assert "Happy Birthday, Test Person! 🎉" in text_output
+    assert "Un cordial saludo" in html_output
+    assert "Feliz cumpleaños, Test Person! 🎉" in text_output
+    assert "Hi Test Person," in text_output
     assert "https://assets.example.com/birthday-banner.jpg" not in text_output
 
 
@@ -36,10 +38,12 @@ def test_birthday_templates_render_url_image_mode() -> None:
         image_url=image_url,
     )
 
-    assert "Happy Birthday, Test Person! 🎉" in html_output
+    assert 'lang="es"' in html_output
+    assert "Estimado/a <strong>Test Person</strong>" in html_output
     assert image_url in html_output
     assert "cid:birthday_banner" not in html_output
-    assert "Happy Birthday, Test Person! 🎉" in text_output
+    assert "Un cordial saludo" in html_output
+    assert "Feliz cumpleaños, Test Person! 🎉" in text_output
     assert image_url in text_output
 
 
@@ -57,11 +61,13 @@ def test_birthday_templates_render_none_image_mode() -> None:
         image_url=image_url,
     )
 
-    assert "Happy Birthday, Test Person! 🎉" in html_output
-    assert "Hi Test Person," in html_output
+    assert 'lang="es"' in html_output
+    assert "Estimado/a <strong>Test Person</strong>" in html_output
     assert "cid:birthday_banner" not in html_output
     assert image_url not in html_output
-    assert "Happy Birthday, Test Person! 🎉" in text_output
+    assert "Un cordial saludo" in html_output
+    assert "Feliz cumpleaños, Test Person! 🎉" in text_output
+    assert "Hi Test Person," in text_output
     assert image_url not in text_output
 
 

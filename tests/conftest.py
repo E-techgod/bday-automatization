@@ -15,6 +15,12 @@ class TestTimeoutExpired(Exception):
     pass
 
 
+@pytest.fixture(autouse=True)
+def _disable_project_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Keep unit tests isolated from the developer's local .env file.
+    monkeypatch.setattr("app.config.load_dotenv", lambda **_kwargs: False)
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addini(
         "timeout",
