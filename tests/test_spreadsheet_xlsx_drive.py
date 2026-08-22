@@ -132,6 +132,35 @@ def test_xlsx_drive_load_rows_preserves_native_birthday_datetime() -> None:
     assert parse_birthday(rows[0]["Birthday"]) == date(2000, 1, 2)
 
 
+def test_xlsx_drive_load_rows_stops_at_first_row_without_name_or_last_name() -> None:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.append(["Name", "Last Name", "Email", "Birthday"])
+    worksheet.append(["Test", "Person", "test.person@example.com", "2000-01-02"])
+    worksheet.append(["", "", "", ""])
+    worksheet.append(["Second", "Person", "second@example.com", "1999-05-06"])
+
+    buffer = BytesIO()
+    workbook.save(buffer)
+    workbook.close()
+
+    provider = XlsxDriveProvider(
+        config=_build_config(),
+        service_factory=lambda: _FakeDriveService(buffer.getvalue()),
+    )
+
+    rows = provider.load_rows()
+
+    assert rows == [
+        {
+            "Name": "Test",
+            "Last Name": "Person",
+            "Email": "test.person@example.com",
+            "Birthday": "2000-01-02",
+        }
+    ]
+
+
 def test_xlsx_drive_load_rows_closes_workbook_on_header_resolution_failure() -> None:
     workbook = Mock()
     worksheet = Mock()

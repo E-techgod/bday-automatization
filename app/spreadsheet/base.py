@@ -76,6 +76,15 @@ def build_row_dict(
     return row
 
 
+def row_has_client_identity(
+    raw_row: list[object], resolved_headers: dict[str, int], config: Config
+) -> bool:
+    return any(
+        _cell_has_value(raw_row, resolved_headers.get(column_name))
+        for column_name in (config.name_column, config.last_name_column)
+    )
+
+
 def _require_header(logical_name: str, normalized_headers: dict[str, int]) -> int:
     header_index = normalized_headers.get(_normalize_header(logical_name))
     if header_index is None:
@@ -110,3 +119,14 @@ def _validate_distinct_configured_headers(config: Config) -> None:
 
 def _normalize_header(value: str) -> str:
     return value.strip().casefold()
+
+
+def _cell_has_value(raw_row: list[object], column_index: int | None) -> bool:
+    if column_index is None or column_index >= len(raw_row):
+        return False
+    value = raw_row[column_index]
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    return True

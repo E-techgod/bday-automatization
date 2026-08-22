@@ -19,6 +19,7 @@ from app.spreadsheet.base import (
     SpreadsheetError,
     SpreadsheetProvider,
     build_row_dict,
+    row_has_client_identity,
     resolve_headers,
 )
 
@@ -76,17 +77,14 @@ class XlsxDriveProvider(SpreadsheetProvider):
 
             header_row = ["" if cell is None else str(cell) for cell in raw_header_row]
             resolved_headers = resolve_headers(header_row, self._config)
-            #print("RAW HEADERS:", header_row)
-            #print("RESOLVED HEADERS:", resolved_headers)
-            rows = [
-                build_row_dict(list(raw_row), resolved_headers)
-                for raw_row in row_iterator
-            ]
-
-            #print("FIRST 5 PARSED ROWS:")
-            #for row in rows[:5]:
-                #print(row)
-
+            rows: list[dict[str, object]] = []
+            for raw_row in row_iterator:
+                materialized_row = list(raw_row)
+                if not row_has_client_identity(
+                    materialized_row, resolved_headers, self._config
+                ):
+                    break
+                rows.append(build_row_dict(materialized_row, resolved_headers))
             return rows
         finally:
             workbook.close()

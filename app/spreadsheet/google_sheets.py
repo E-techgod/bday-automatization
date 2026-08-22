@@ -14,6 +14,7 @@ from app.spreadsheet.base import (
     SpreadsheetError,
     SpreadsheetProvider,
     build_row_dict,
+    row_has_client_identity,
     resolve_headers,
 )
 
@@ -54,9 +55,15 @@ class GoogleSheetsProvider(SpreadsheetProvider):
 
         header_row = [str(cell) for cell in values[0]]
         resolved_headers = resolve_headers(header_row, self._config)
-        return [
-            build_row_dict(list(raw_row), resolved_headers) for raw_row in values[1:]
-        ]
+        rows: list[dict[str, object]] = []
+        for raw_row in values[1:]:
+            materialized_row = list(raw_row)
+            if not row_has_client_identity(
+                materialized_row, resolved_headers, self._config
+            ):
+                break
+            rows.append(build_row_dict(materialized_row, resolved_headers))
+        return rows
 
     def _fetch_values_with_retry(self) -> list[list[object]]:
         @retry_with_backoff(
