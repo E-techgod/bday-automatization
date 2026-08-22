@@ -407,6 +407,3 @@ Critical ambiguous-send log:
 - Check the mailbox manually before the stale-claim window elapses.
 - The claim is intentionally left `pending` so it is not immediately reclaimable; after `STALE_CLAIM_TIMEOUT_MINUTES`, a future run may retry and could double-send if the original request actually succeeded.
 - A rerun before `STALE_CLAIM_TIMEOUT_MINUTES` elapses can see the same claim as `IN_PROGRESS` instead of ambiguous, but that rerun still exits non-zero because `in_progress` also contributes to exit status 1. The exit code alone still does not distinguish a routine overlapping-run `IN_PROGRESS` from an unresolved ambiguous-send incident, so operators must read the actual log output and treat any earlier `CRITICAL` ambiguous-send event as authoritative until the mailbox is verified manually.
-
-
-codex resume 01a02712-cc4e-7880-8eda-8941ed5b836f
