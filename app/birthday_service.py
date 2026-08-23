@@ -447,7 +447,7 @@ def _render_message(
     get_inline_image: Callable[[], InlineImage | None],
 ) -> EmailMessage:
     template_context = {
-        "name": client.display_name,
+        "name": client.name,
         "salutation": client.salutation,
         "image_mode": config.birthday_image_mode,
         "image_alt": config.birthday_image_alt,
@@ -458,11 +458,11 @@ def _render_message(
     html_body = html_env.get_template("birthday_email.html").render(template_context)
     text_body = html_env.get_template("birthday_email.txt").render(template_context)
     subject = subject_env.from_string(config.email_subject_template).render(
-        name=client.display_name
+        name=client.name
     )
     return EmailMessage(
         to_email=client.email,
-        to_name=client.display_name,
+        to_name=client.name,
         from_name=config.email_from_name,
         from_address=config.email_from_address,
         subject=subject,

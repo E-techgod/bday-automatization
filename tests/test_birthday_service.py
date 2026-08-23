@@ -53,7 +53,7 @@ def test_birthday_today_claims_and_sends(caplog: pytest.LogCaptureFixture) -> No
     assert "birthday email sent to test.person@example.com" in caplog.text
 
 
-def test_birthday_email_uses_full_display_name_when_last_name_present() -> None:
+def test_birthday_email_uses_first_name_only_when_last_name_present() -> None:
     provider = FakeSpreadsheetProvider(
         rows=[
             _row(
@@ -75,10 +75,13 @@ def test_birthday_email_uses_full_display_name_when_last_name_present() -> None:
     )
 
     sent_message = email_provider.sent_messages[0]
-    assert sent_message.to_name == "Test Person"
-    assert "Test Person" in sent_message.subject
-    assert "Test Person" in sent_message.html_body
-    assert "Test Person" in sent_message.text_body
+    assert sent_message.to_name == "Test"
+    assert "Test Person" not in sent_message.subject
+    assert "Test Person" not in sent_message.html_body
+    assert "Test Person" not in sent_message.text_body
+    assert "Test" in sent_message.subject
+    assert "Test" in sent_message.html_body
+    assert "Test" in sent_message.text_body
 
 
 def test_birthday_email_uses_first_name_only_when_last_name_missing() -> None:
@@ -106,7 +109,7 @@ def test_birthday_email_uses_first_name_only_when_last_name_missing() -> None:
     assert "Test Person" not in sent_message.subject
 
 
-def test_birthday_email_normalizes_whitespace_in_display_name() -> None:
+def test_birthday_email_normalizes_whitespace_in_name() -> None:
     provider = FakeSpreadsheetProvider(
         rows=[
             _row(
@@ -127,7 +130,7 @@ def test_birthday_email_normalizes_whitespace_in_display_name() -> None:
         clock=FixedClock(date(2026, 1, 1)),
     )
 
-    assert email_provider.sent_messages[0].to_name == "Test Person"
+    assert email_provider.sent_messages[0].to_name == "Test"
 
 
 def test_birthday_email_uses_estimada_salutation_for_female_gender() -> None:
