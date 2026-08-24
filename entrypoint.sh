@@ -1,7 +1,12 @@
 #!/bin/sh
 set -e
 
-cp /run/secrets/oauth-token/token.json /tmp/quiron-token.json
-chmod 600 /tmp/quiron-token.json
+TOKEN_PATH="${GOOGLE_OAUTH_TOKEN_FILE:-/tmp/quiron-token.json}"
+
+rm -f "$TOKEN_PATH"
+umask 077
+cat /run/secrets/oauth-token/token.json > "$TOKEN_PATH"
+
+test -w "$TOKEN_PATH"
 
 exec python run.py
