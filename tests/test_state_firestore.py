@@ -169,6 +169,32 @@ class FakeFirestoreClient:
         return FakeTransaction(self._collection, self)
 
 
+def test_constructor_passes_explicit_project_and_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeFirestoreModule:
+        class Client:
+            def __init__(self, *, project: str | None = None, database: str | None = None) -> None:
+                captured["project"] = project
+                captured["database"] = database
+
+            def collection(self, _name: str) -> FakeCollection:
+                return FakeCollection()
+
+    monkeypatch.setattr("app.state.firestore.firestore", FakeFirestoreModule)
+    monkeypatch.setattr(
+        "app.state.firestore.google_auth_default",
+        lambda: (object(), "synthetic-project"),
+    )
+
+    FirestoreStateStore(30, firestore_database="birthday-automation")
+
+    assert captured == {
+        "project": "synthetic-project",
+        "database": "birthday-automation",
+    }
+
+
 def test_first_claim_creates_pending_record() -> None:
     store, client = _build_store()
 

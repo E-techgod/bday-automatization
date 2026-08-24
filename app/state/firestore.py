@@ -4,6 +4,8 @@ from datetime import UTC, datetime, timedelta
 from collections.abc import Iterator
 from typing import Any, TypeVar
 
+from google.auth import default as google_auth_default  # type: ignore[import-untyped]
+
 from app.state.base import (
     ClaimOutcome,
     ClaimResult,
@@ -38,13 +40,18 @@ class FirestoreStateStore:
         *,
         client: Any | None = None,
         collection_name: str = _DEFAULT_COLLECTION_NAME,
+        firestore_database: str = "(default)",
     ) -> None:
         if client is None:
             if firestore is None:
                 raise RuntimeError(
                     "STATE_BACKEND=firestore requires the 'google-cloud-firestore' package"
                 )
-            client = firestore.Client()
+            _credentials, project_id = google_auth_default()
+            client = firestore.Client(
+                project=project_id,
+                database=firestore_database,
+            )
         self._client = client
         self._collection = client.collection(collection_name)
         self._stale_claim_timeout = timedelta(minutes=stale_claim_timeout_minutes)

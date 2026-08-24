@@ -188,6 +188,7 @@ Copy `.env.example` to `.env` and fill in every required value for your deployme
 | `BIRTHDAY_IMAGE_WIDTH` | `600` | HTML width for the image | Always | Must be a positive integer |
 | `STATE_BACKEND` | `sqlite` | State backend selector | Always | Must be `sqlite` or `firestore` |
 | `STATE_DB_PATH` | `data/birthday_state.db` | SQLite state database path | Only when `STATE_BACKEND=sqlite` | Relative to project root; directory is created automatically |
+| `FIRESTORE_DATABASE` | `birthday-automation` | Firestore database name | Only when `STATE_BACKEND=firestore` | Passed explicitly to the Firestore client |
 | `STALE_CLAIM_TIMEOUT_MINUTES` | `30` | Reclaim window for stale `pending` claims | Always | Must be a positive integer |
 | `RETRY_MAX_ATTEMPTS` | `3` | Retry attempts for transient Sheets/Drive API failures | Always | Must be a positive integer |
 | `RETRY_BASE_DELAY_SECONDS` | `1.0` | Base exponential backoff delay for transient Sheets/Drive failures | Always | Must be a positive number |
@@ -234,6 +235,7 @@ BIRTHDAY_IMAGE_WIDTH=600
 
 STATE_BACKEND=sqlite
 STATE_DB_PATH=data/birthday_state.db
+FIRESTORE_DATABASE=birthday-automation
 STALE_CLAIM_TIMEOUT_MINUTES=30
 
 RETRY_MAX_ATTEMPTS=3
@@ -385,6 +387,7 @@ Cloud Run Jobs is supported when you switch to Firestore-backed state:
 
 - Set `STATE_BACKEND=firestore`
 - Do not set `STATE_DB_PATH`
+- Set `FIRESTORE_DATABASE=birthday-automation` unless you intentionally use a different Firestore database
 - Ensure the Cloud Run Job service account has Firestore access in the target Google Cloud project
 - Firestore authentication uses Google Application Default Credentials automatically; do not mount or hardcode a Firestore credential file just for state
 
@@ -418,3 +421,6 @@ Critical ambiguous-send log:
 - Check the mailbox manually before the stale-claim window elapses.
 - The claim is intentionally left `pending` so it is not immediately reclaimable; after `STALE_CLAIM_TIMEOUT_MINUTES`, a future run may retry and could double-send if the original request actually succeeded.
 - A rerun before `STALE_CLAIM_TIMEOUT_MINUTES` elapses can see the same claim as `IN_PROGRESS` instead of ambiguous, but that rerun still exits non-zero because `in_progress` also contributes to exit status 1. The exit code alone still does not distinguish a routine overlapping-run `IN_PROGRESS` from an unresolved ambiguous-send incident, so operators must read the actual log output and treat any earlier `CRITICAL` ambiguous-send event as authoritative until the mailbox is verified manually.
+
+
+codex resume 01a03477-9491-7630-a824-fc788c293833
