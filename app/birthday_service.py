@@ -185,8 +185,9 @@ def _load_oauth_user_credentials(config: Config) -> Any:
         )
         credentials = flow.run_local_server(port=0)
 
-    token_path.parent.mkdir(parents=True, exist_ok=True)
-    token_path.write_text(credentials.to_json(), encoding="utf-8")
+    if config.google_oauth_token_persist:
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        token_path.write_text(credentials.to_json(), encoding="utf-8")
     return credentials
 
 

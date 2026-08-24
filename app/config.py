@@ -79,6 +79,7 @@ class Config:
     google_impersonate_subject: str
     google_oauth_client_secrets_file: Path | None
     google_oauth_token_file: Path
+    google_oauth_token_persist: bool
     birthday_image_mode: BirthdayImageMode
     birthday_image_path: Path
     birthday_image_url: str
@@ -111,6 +112,10 @@ def load_config() -> Config:
         _load_google_auth_files(google_auth_mode)
     )
     google_oauth_token_file = _load_google_oauth_token_path()
+    google_oauth_token_persist = _parse_bool(
+        "GOOGLE_OAUTH_TOKEN_PERSIST",
+        _get_env("GOOGLE_OAUTH_TOKEN_PERSIST", "true"),
+    )
     birthday_image_mode = _parse_image_mode(_get_env("BIRTHDAY_IMAGE_MODE", "local"))
     birthday_image_path = _load_birthday_image_path()
     birthday_image_url = _get_env("BIRTHDAY_IMAGE_URL", "")
@@ -159,6 +164,7 @@ def load_config() -> Config:
         google_impersonate_subject=google_impersonate_subject,
         google_oauth_client_secrets_file=google_oauth_client_secrets_file,
         google_oauth_token_file=google_oauth_token_file,
+        google_oauth_token_persist=google_oauth_token_persist,
         birthday_image_mode=birthday_image_mode,
         birthday_image_path=birthday_image_path,
         birthday_image_url=birthday_image_url,

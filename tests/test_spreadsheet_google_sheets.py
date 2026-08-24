@@ -318,6 +318,7 @@ def _build_config(*, google_sheet_tab: str = "Birthdays") -> Config:
         google_impersonate_subject="sender@example.com",
         google_oauth_client_secrets_file=None,
         google_oauth_token_file=Path("synthetic-oauth-token.json"),
+        google_oauth_token_persist=True,
         birthday_image_mode="none",
         birthday_image_path=Path("synthetic-banner.png"),
         birthday_image_url="",

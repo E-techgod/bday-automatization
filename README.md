@@ -127,10 +127,11 @@ As an alternative to a service account, you can authenticate as your own Google 
    GOOGLE_AUTH_MODE=oauth
    GOOGLE_OAUTH_CLIENT_SECRETS_FILE=secrets/your-oauth-client.json
    GOOGLE_OAUTH_TOKEN_FILE=data/google_oauth_token.json
+   GOOGLE_OAUTH_TOKEN_PERSIST=true
    ```
 
 3. Install the OAuth dev dependency (`uv sync` picks it up automatically since it's in the `dev` dependency group).
-4. Run the app. The first run opens a browser for consent and caches the resulting token at `GOOGLE_OAUTH_TOKEN_FILE`; later runs reuse (and silently refresh) that cached token.
+4. Run the app. The first run opens a browser for consent and caches the resulting token at `GOOGLE_OAUTH_TOKEN_FILE`; later runs reuse it and, by default, persist silently refreshed credentials back to that file.
 
 Notes:
 
@@ -181,6 +182,7 @@ Copy `.env.example` to `.env` and fill in every required value for your deployme
 | `GOOGLE_IMPERSONATE_SUBJECT` | empty | Gmail impersonation subject (service account mode only) | Optional | Must be an email if set; defaults to `EMAIL_FROM_ADDRESS` if blank |
 | `GOOGLE_OAUTH_CLIENT_SECRETS_FILE` | empty | OAuth "Desktop app" client JSON path | Required when `GOOGLE_AUTH_MODE=oauth` | File must exist at startup |
 | `GOOGLE_OAUTH_TOKEN_FILE` | `data/google_oauth_token.json` | Cached OAuth user token path | Used only when `GOOGLE_AUTH_MODE=oauth` | Relative to project root; created on first interactive consent |
+| `GOOGLE_OAUTH_TOKEN_PERSIST` | `true` | Controls whether refreshed OAuth user credentials are written back to `GOOGLE_OAUTH_TOKEN_FILE` | Used only when `GOOGLE_AUTH_MODE=oauth` | Set to `false` for read-only token mounts such as Cloud Run Secret Manager volumes |
 | `BIRTHDAY_IMAGE_MODE` | `local` | Controls birthday image handling | Always | Must be `none`, `local`, or `url` |
 | `BIRTHDAY_IMAGE_PATH` | `app/assets/birthday_banner.jpg` | Local inline image file path | Required when `BIRTHDAY_IMAGE_MODE=local` | File must exist at startup |
 | `BIRTHDAY_IMAGE_URL` | empty | Remote image URL for email template | Required when `BIRTHDAY_IMAGE_MODE=url` | Must be an `https://` URL |
@@ -226,6 +228,7 @@ GOOGLE_IMPERSONATE_SUBJECT=
 
 GOOGLE_OAUTH_CLIENT_SECRETS_FILE=
 GOOGLE_OAUTH_TOKEN_FILE=data/google_oauth_token.json
+GOOGLE_OAUTH_TOKEN_PERSIST=true
 
 BIRTHDAY_IMAGE_MODE=local
 BIRTHDAY_IMAGE_PATH=app/assets/birthday_banner.jpg
@@ -388,6 +391,7 @@ Cloud Run Jobs is supported when you switch to Firestore-backed state:
 - Set `STATE_BACKEND=firestore`
 - Do not set `STATE_DB_PATH`
 - Set `FIRESTORE_DATABASE=birthday-automation` unless you intentionally use a different Firestore database
+- If `GOOGLE_AUTH_MODE=oauth` and `GOOGLE_OAUTH_TOKEN_FILE` comes from a read-only Secret Manager mount, set `GOOGLE_OAUTH_TOKEN_PERSIST=false`
 - Ensure the Cloud Run Job service account has Firestore access in the target Google Cloud project
 - Firestore authentication uses Google Application Default Credentials automatically; do not mount or hardcode a Firestore credential file just for state
 

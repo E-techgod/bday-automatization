@@ -841,6 +841,7 @@ class _FakeOAuthCredentials:
         self.valid = valid
         self.refresh_token = refresh_token
         self.refresh_calls = 0
+        self.to_json_calls = 0
 
     def refresh(self, request: object) -> None:
         self.refresh_calls += 1
@@ -848,6 +849,7 @@ class _FakeOAuthCredentials:
         self.valid = True
 
     def to_json(self) -> str:
+        self.to_json_calls += 1
         return "{}"
 
 
@@ -978,6 +980,104 @@ def test_oauth_credentials_refresh_expired_token_without_running_flow(
     build_email_provider(config)
 
     assert expired_credentials.refresh_calls == 1
+    assert expired_credentials.to_json_calls == 1
+    assert token_path.read_text(encoding="utf-8") == "{}"
+
+
+def test_oauth_credentials_refresh_expired_token_without_persisting_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    token_path = tmp_path / "token.json"
+    original_token = '{"access_token":"stale"}'
+    token_path.write_text(original_token, encoding="utf-8")
+    expired_credentials = _FakeOAuthCredentials(
+        expired=True, valid=False, refresh_token="synthetic-refresh-token"
+    )
+    provider_credentials: list[object] = []
+
+    monkeypatch.setattr(
+        "app.birthday_service.GoogleOAuthCredentials.from_authorized_user_file",
+        lambda filename, scopes: expired_credentials,
+    )
+    monkeypatch.setattr(
+        "google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file",
+        classmethod(
+            lambda cls, filename, scopes: (_ for _ in ()).throw(
+                AssertionError("interactive flow should not run when a refresh token exists")
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "app.birthday_service.GmailProvider.from_credentials",
+        classmethod(
+            lambda cls, config, credentials: (
+                provider_credentials.append(credentials),
+                FakeEmailProvider(),
+            )[1]
+        ),
+    )
+
+    config = _build_config(
+        google_auth_mode="oauth",
+        google_credentials_file=None,
+        google_oauth_client_secrets_file=Path("synthetic-client-secrets.json"),
+        google_oauth_token_file=token_path,
+        google_oauth_token_persist=False,
+    )
+
+    build_email_provider(config)
+
+    assert expired_credentials.refresh_calls == 1
+    assert expired_credentials.to_json_calls == 0
+    assert provider_credentials == [expired_credentials]
+    assert token_path.read_text(encoding="utf-8") == original_token
+
+
+def test_oauth_credentials_valid_cached_token_without_persisting_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    token_path = tmp_path / "token.json"
+    original_token = '{"access_token":"current"}'
+    token_path.write_text(original_token, encoding="utf-8")
+    cached_credentials = _FakeOAuthCredentials()
+    provider_credentials: list[object] = []
+
+    monkeypatch.setattr(
+        "app.birthday_service.GoogleOAuthCredentials.from_authorized_user_file",
+        lambda filename, scopes: cached_credentials,
+    )
+    monkeypatch.setattr(
+        "google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file",
+        classmethod(
+            lambda cls, filename, scopes: (_ for _ in ()).throw(
+                AssertionError("interactive flow should not run for a valid token")
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "app.birthday_service.GmailProvider.from_credentials",
+        classmethod(
+            lambda cls, config, credentials: (
+                provider_credentials.append(credentials),
+                FakeEmailProvider(),
+            )[1]
+        ),
+    )
+
+    config = _build_config(
+        google_auth_mode="oauth",
+        google_credentials_file=None,
+        google_oauth_client_secrets_file=Path("synthetic-client-secrets.json"),
+        google_oauth_token_file=token_path,
+        google_oauth_token_persist=False,
+    )
+
+    build_email_provider(config)
+
+    assert cached_credentials.refresh_calls == 0
+    assert cached_credentials.to_json_calls == 0
+    assert provider_credentials == [cached_credentials]
+    assert token_path.read_text(encoding="utf-8") == original_token
 
 
 def test_oauth_credentials_runs_installed_app_flow_when_no_cached_token(
@@ -1537,6 +1637,7 @@ def _build_config(
     google_credentials_file: Path | None = Path("synthetic-credentials.json"),
     google_oauth_client_secrets_file: Path | None = None,
     google_oauth_token_file: Path = Path("synthetic-oauth-token.json"),
+    google_oauth_token_persist: bool = True,
 ) -> Config:
     return Config(
         app_timezone="America/Chicago",
@@ -1561,6 +1662,7 @@ def _build_config(
         google_impersonate_subject="sender@example.com",
         google_oauth_client_secrets_file=google_oauth_client_secrets_file,
         google_oauth_token_file=google_oauth_token_file,
+        google_oauth_token_persist=google_oauth_token_persist,
         birthday_image_mode=birthday_image_mode,
         birthday_image_path=birthday_image_path,
         birthday_image_url="https://assets.example.com/birthday-banner.jpg",

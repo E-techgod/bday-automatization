@@ -368,6 +368,46 @@ def test_load_config_relative_google_oauth_token_path_is_independent_of_cwd(
     assert config.google_oauth_token_file == _DEFAULT_GOOGLE_OAUTH_TOKEN_PATH
 
 
+def test_load_config_oauth_token_persist_defaults_true(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.delenv("GOOGLE_OAUTH_TOKEN_PERSIST", raising=False)
+
+    config = load_config()
+
+    assert config.google_oauth_token_persist is True
+
+
+def test_load_config_oauth_token_persist_accepts_false(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.setenv("GOOGLE_OAUTH_TOKEN_PERSIST", "false")
+
+    config = load_config()
+
+    assert config.google_oauth_token_persist is False
+
+
+def test_load_config_invalid_oauth_token_persist_raises(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.setenv("GOOGLE_OAUTH_TOKEN_PERSIST", "sometimes")
+
+    with pytest.raises(
+        ConfigError, match="GOOGLE_OAUTH_TOKEN_PERSIST must be 'true' or 'false'"
+    ):
+        load_config()
+
+
 def test_load_config_succeeds_with_real_env_example_defaults(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -397,6 +437,7 @@ def test_load_config_succeeds_with_real_env_example_defaults(
     assert config.birthday_image_path == _DEFAULT_BIRTHDAY_IMAGE_PATH
     assert config.birthday_image_path.is_file()
     assert config.email_provider == "gmail"
+    assert config.google_oauth_token_persist is True
 
 
 def test_load_config_default_birthday_image_path_is_independent_of_cwd(
