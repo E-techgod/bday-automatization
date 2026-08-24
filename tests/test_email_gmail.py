@@ -253,6 +253,7 @@ def _build_config() -> Config:
         google_impersonate_subject="sender@example.com",
         google_oauth_client_secrets_file=None,
         google_oauth_token_file=Path("synthetic-oauth-token.json"),
+        google_oauth_token_persist=True,
         birthday_image_mode="local",
         birthday_image_path=Path("app/assets/birthday_banner.jpg"),
         birthday_image_url="https://assets.example.com/birthday-banner.jpg",
