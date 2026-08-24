@@ -22,3 +22,6 @@ secrets/
 .DS_Store
 graphify-out/
 PLAN.md
+.env.deploy
+cloudrun-env.yaml
+cloudrun-env.yaml
