@@ -258,6 +258,7 @@ def _build_config() -> Config:
         birthday_image_url="https://assets.example.com/birthday-banner.jpg",
         birthday_image_alt="Happy Birthday banner",
         birthday_image_width=600,
+        state_backend="sqlite",
         state_db_path=Path("synthetic-state.db"),
         stale_claim_timeout_minutes=30,
         retry_max_attempts=3,

@@ -40,6 +40,7 @@ SpreadsheetMode = Literal["google_sheet", "xlsx_drive"]
 BirthdayImageMode = Literal["none", "local", "url"]
 EmailProvider = Literal["gmail"]
 GoogleAuthMode = Literal["service_account", "oauth"]
+StateBackend = Literal["sqlite", "firestore"]
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _TEST_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -82,7 +83,8 @@ class Config:
     birthday_image_url: str
     birthday_image_alt: str
     birthday_image_width: int
-    state_db_path: Path
+    state_backend: StateBackend
+    state_db_path: Path | None
     stale_claim_timeout_minutes: int
     retry_max_attempts: int
     retry_base_delay_seconds: float
@@ -114,6 +116,7 @@ def load_config() -> Config:
         "BIRTHDAY_IMAGE_WIDTH",
         _get_env("BIRTHDAY_IMAGE_WIDTH", "600"),
     )
+    state_backend = _parse_state_backend(_get_env("STATE_BACKEND", "sqlite"))
 
     google_sheet_id = _get_env("GOOGLE_SHEET_ID", "")
     google_drive_file_id = _get_env("GOOGLE_DRIVE_FILE_ID", "")
@@ -159,7 +162,8 @@ def load_config() -> Config:
         birthday_image_url=birthday_image_url,
         birthday_image_alt=_get_env("BIRTHDAY_IMAGE_ALT", "Happy Birthday"),
         birthday_image_width=birthday_image_width,
-        state_db_path=_load_state_db_path(),
+        state_backend=state_backend,
+        state_db_path=_load_state_db_path(state_backend),
         stale_claim_timeout_minutes=_parse_positive_int(
             "STALE_CLAIM_TIMEOUT_MINUTES",
             _get_env("STALE_CLAIM_TIMEOUT_MINUTES", "30"),
@@ -190,7 +194,9 @@ def _load_birthday_image_path() -> Path:
     return _resolve_project_relative_path(configured_path)
 
 
-def _load_state_db_path() -> Path:
+def _load_state_db_path(state_backend: StateBackend) -> Path | None:
+    if state_backend != "sqlite":
+        return None
     configured_path = os.environ.get("STATE_DB_PATH")
     if configured_path is None:
         return _DEFAULT_STATE_DB_PATH
@@ -249,6 +255,15 @@ def _parse_google_auth_mode(value: str) -> GoogleAuthMode:
     if normalized == "oauth":
         return "oauth"
     raise ConfigError("GOOGLE_AUTH_MODE must be 'service_account' or 'oauth'")
+
+
+def _parse_state_backend(value: str) -> StateBackend:
+    normalized = value.strip().casefold()
+    if normalized == "sqlite":
+        return "sqlite"
+    if normalized == "firestore":
+        return "firestore"
+    raise ConfigError("STATE_BACKEND must be 'sqlite' or 'firestore'")
 
 
 def _load_google_auth_files(

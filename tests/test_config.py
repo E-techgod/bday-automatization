@@ -492,6 +492,7 @@ def test_load_config_default_state_db_path_is_independent_of_cwd(
 
     config = load_config()
 
+    assert config.state_backend == "sqlite"
     assert config.state_db_path == _DEFAULT_STATE_DB_PATH
     assert config.state_db_path.is_absolute()
 
@@ -524,8 +525,39 @@ def test_load_config_relative_state_db_path_is_independent_of_cwd(
 
     config = load_config()
 
+    assert config.state_backend == "sqlite"
     assert config.state_db_path == _DEFAULT_STATE_DB_PATH
     assert config.state_db_path.is_absolute()
+
+
+def test_load_config_firestore_backend_does_not_require_state_db_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.setenv("STATE_BACKEND", "firestore")
+    monkeypatch.delenv("STATE_DB_PATH", raising=False)
+
+    config = load_config()
+
+    assert config.state_backend == "firestore"
+    assert config.state_db_path is None
+
+
+def test_load_config_invalid_state_backend_raises(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.setenv("STATE_BACKEND", "redis")
+
+    with pytest.raises(
+        ConfigError,
+        match="STATE_BACKEND must be 'sqlite' or 'firestore'",
+    ):
+        load_config()
 
 
 def test_load_config_relative_google_credentials_file_is_independent_of_cwd(
@@ -647,6 +679,7 @@ def _set_base_env(
         "BIRTHDAY_IMAGE_URL": "",
         "BIRTHDAY_IMAGE_ALT": "Happy Birthday",
         "BIRTHDAY_IMAGE_WIDTH": "600",
+        "STATE_BACKEND": "sqlite",
         "STATE_DB_PATH": "data/birthday_state.db",
         "STALE_CLAIM_TIMEOUT_MINUTES": "30",
         "RETRY_MAX_ATTEMPTS": "3",
