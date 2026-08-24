@@ -325,6 +325,7 @@ def _build_config(*, google_sheet_tab: str = "Birthdays") -> Config:
         birthday_image_width=600,
         state_backend="sqlite",
         state_db_path=Path("synthetic-state.db"),
+        firestore_database="birthday-automation",
         stale_claim_timeout_minutes=30,
         retry_max_attempts=3,
         retry_base_delay_seconds=1.0,

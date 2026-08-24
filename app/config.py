@@ -48,6 +48,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_BIRTHDAY_IMAGE_PATH = _PROJECT_ROOT / "app/assets/birthday_banner.jpg"
 _DEFAULT_STATE_DB_PATH = _PROJECT_ROOT / "data/birthday_state.db"
 _DEFAULT_GOOGLE_OAUTH_TOKEN_PATH = _PROJECT_ROOT / "data/google_oauth_token.json"
+_DEFAULT_FIRESTORE_DATABASE = "birthday-automation"
 
 
 class ConfigError(ValueError):
@@ -85,6 +86,7 @@ class Config:
     birthday_image_width: int
     state_backend: StateBackend
     state_db_path: Path | None
+    firestore_database: str
     stale_claim_timeout_minutes: int
     retry_max_attempts: int
     retry_base_delay_seconds: float
@@ -164,6 +166,9 @@ def load_config() -> Config:
         birthday_image_width=birthday_image_width,
         state_backend=state_backend,
         state_db_path=_load_state_db_path(state_backend),
+        firestore_database=_get_env(
+            "FIRESTORE_DATABASE", _DEFAULT_FIRESTORE_DATABASE
+        ),
         stale_claim_timeout_minutes=_parse_positive_int(
             "STALE_CLAIM_TIMEOUT_MINUTES",
             _get_env("STALE_CLAIM_TIMEOUT_MINUTES", "30"),

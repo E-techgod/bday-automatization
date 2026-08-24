@@ -8,6 +8,7 @@ import pytest
 import app.config as config_module
 from app.config import (
     _DEFAULT_BIRTHDAY_IMAGE_PATH,
+    _DEFAULT_FIRESTORE_DATABASE,
     _DEFAULT_GOOGLE_OAUTH_TOKEN_PATH,
     _DEFAULT_STATE_DB_PATH,
     ConfigError,
@@ -494,6 +495,7 @@ def test_load_config_default_state_db_path_is_independent_of_cwd(
 
     assert config.state_backend == "sqlite"
     assert config.state_db_path == _DEFAULT_STATE_DB_PATH
+    assert config.firestore_database == _DEFAULT_FIRESTORE_DATABASE
     assert config.state_db_path.is_absolute()
 
 
@@ -527,6 +529,7 @@ def test_load_config_relative_state_db_path_is_independent_of_cwd(
 
     assert config.state_backend == "sqlite"
     assert config.state_db_path == _DEFAULT_STATE_DB_PATH
+    assert config.firestore_database == _DEFAULT_FIRESTORE_DATABASE
     assert config.state_db_path.is_absolute()
 
 
@@ -543,6 +546,22 @@ def test_load_config_firestore_backend_does_not_require_state_db_path(
 
     assert config.state_backend == "firestore"
     assert config.state_db_path is None
+    assert config.firestore_database == _DEFAULT_FIRESTORE_DATABASE
+
+
+def test_load_config_uses_configured_firestore_database(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.setenv("STATE_BACKEND", "firestore")
+    monkeypatch.setenv("FIRESTORE_DATABASE", "custom-db")
+
+    config = load_config()
+
+    assert config.state_backend == "firestore"
+    assert config.firestore_database == "custom-db"
 
 
 def test_load_config_invalid_state_backend_raises(
@@ -681,6 +700,7 @@ def _set_base_env(
         "BIRTHDAY_IMAGE_WIDTH": "600",
         "STATE_BACKEND": "sqlite",
         "STATE_DB_PATH": "data/birthday_state.db",
+        "FIRESTORE_DATABASE": "birthday-automation",
         "STALE_CLAIM_TIMEOUT_MINUTES": "30",
         "RETRY_MAX_ATTEMPTS": "3",
         "RETRY_BASE_DELAY_SECONDS": "1.0",

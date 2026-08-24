@@ -219,7 +219,10 @@ def _build_state_store_accessor(
         nonlocal store
         if store is None:
             if config.state_backend == "firestore":
-                store = FirestoreStateStore(config.stale_claim_timeout_minutes)
+                store = FirestoreStateStore(
+                    config.stale_claim_timeout_minutes,
+                    firestore_database=config.firestore_database,
+                )
             else:
                 if config.state_db_path is None:
                     raise RuntimeError(
