@@ -30,7 +30,11 @@ from app.models import Client
 from app.spreadsheet.base import SpreadsheetProvider
 from app.spreadsheet.google_sheets import GoogleSheetsProvider
 from app.spreadsheet.xlsx_drive import XlsxDriveProvider
-from app.state.sqlite import ClaimOutcome, ClaimResult, StateStore
+from app.state.base import ClaimOutcome, ClaimResult, StateStore
+from app.state.firestore import FirestoreStateStore
+from app.state.sqlite import StateStore as SqliteStateStore
+
+StateStore = SqliteStateStore
 
 LOGGER = logging.getLogger(__name__)
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -214,7 +218,17 @@ def _build_state_store_accessor(
     def get_state_store() -> StateStore:
         nonlocal store
         if store is None:
-            store = StateStore(config.state_db_path, config.stale_claim_timeout_minutes)
+            if config.state_backend == "firestore":
+                store = FirestoreStateStore(config.stale_claim_timeout_minutes)
+            else:
+                if config.state_db_path is None:
+                    raise RuntimeError(
+                        "STATE_DB_PATH is required when STATE_BACKEND=sqlite"
+                    )
+                store = StateStore(
+                    config.state_db_path,
+                    config.stale_claim_timeout_minutes,
+                )
         return store
 
     def close_state_store() -> None:

@@ -13,6 +13,7 @@ dependencies = [
     "jinja2",
     "tzdata",
     "google-auth-oauthlib>=1.4.0",
+    "google-cloud-firestore",
 ]
 
 [dependency-groups]

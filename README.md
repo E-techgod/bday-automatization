@@ -186,7 +186,8 @@ Copy `.env.example` to `.env` and fill in every required value for your deployme
 | `BIRTHDAY_IMAGE_URL` | empty | Remote image URL for email template | Required when `BIRTHDAY_IMAGE_MODE=url` | Must be an `https://` URL |
 | `BIRTHDAY_IMAGE_ALT` | `Happy Birthday` | HTML alt text for the image | Always | Plain text value |
 | `BIRTHDAY_IMAGE_WIDTH` | `600` | HTML width for the image | Always | Must be a positive integer |
-| `STATE_DB_PATH` | `data/birthday_state.db` | SQLite state database path | Always in real sends | Relative to project root; directory is created automatically |
+| `STATE_BACKEND` | `sqlite` | State backend selector | Always | Must be `sqlite` or `firestore` |
+| `STATE_DB_PATH` | `data/birthday_state.db` | SQLite state database path | Only when `STATE_BACKEND=sqlite` | Relative to project root; directory is created automatically |
 | `STALE_CLAIM_TIMEOUT_MINUTES` | `30` | Reclaim window for stale `pending` claims | Always | Must be a positive integer |
 | `RETRY_MAX_ATTEMPTS` | `3` | Retry attempts for transient Sheets/Drive API failures | Always | Must be a positive integer |
 | `RETRY_BASE_DELAY_SECONDS` | `1.0` | Base exponential backoff delay for transient Sheets/Drive failures | Always | Must be a positive number |
@@ -231,6 +232,7 @@ BIRTHDAY_IMAGE_URL=
 BIRTHDAY_IMAGE_ALT=Happy Birthday
 BIRTHDAY_IMAGE_WIDTH=600
 
+STATE_BACKEND=sqlite
 STATE_DB_PATH=data/birthday_state.db
 STALE_CLAIM_TIMEOUT_MINUTES=30
 
@@ -265,7 +267,7 @@ Dry run executes config loading, spreadsheet read, row parsing, and birthday mat
 
 Use it when validating configuration, spreadsheet parsing, and birthday matching without affecting real recipients or duplicate-send protection state.
 
-Known limitation (accepted): `load_config()` always calls `_validate_image_settings()`, so when `BIRTHDAY_IMAGE_MODE=local` the configured `BIRTHDAY_IMAGE_PATH` is checked eagerly at startup with `is_file()` on every run, even for `DRY_RUN=true` and zero-birthday-today days. What remains lazy lives in `app/birthday_service.py`: `_process_match()` returns early for `DRY_RUN=true` before claim, template/subject rendering, or send, and `_build_email_provider_accessor`, `_build_state_store_accessor`, and `_build_inline_image_accessor` defer Gmail provider construction/auth, `StateStore` construction and real `STATE_DB_PATH` usability, and the actual inline-image byte read (`read_bytes()`) until an actual send attempt. That means a clean no-op run still does not prove Gmail auth works, that the state DB is writable/usable, that templates or `EMAIL_SUBJECT_TEMPLATE` render successfully, or that the image file's bytes are readable and valid for sending; those failures can stay hidden until the first real birthday send. Operators who want continuous readiness signal should periodically exercise the real send path deliberately, such as a scheduled `DRY_RUN=false` run against a synthetic test recipient/date via `TEST_DATE` outside the normal daily schedule, rather than treating an ordinary day's clean exit as proof the send path works.
+Known limitation (accepted): `load_config()` always calls `_validate_image_settings()`, so when `BIRTHDAY_IMAGE_MODE=local` the configured `BIRTHDAY_IMAGE_PATH` is checked eagerly at startup with `is_file()` on every run, even for `DRY_RUN=true` and zero-birthday-today days. What remains lazy lives in [app/birthday_service.py](/Users/eliasarellanocampos/EAC/Quiron/happybd-automatization/app/birthday_service.py): `_process_match()` returns early for `DRY_RUN=true` before claim, template/subject rendering, or send, and `_build_email_provider_accessor`, `_build_state_store_accessor`, and `_build_inline_image_accessor` defer Gmail provider construction/auth, state store construction and real backend usability, and the actual inline-image byte read (`read_bytes()`) until an actual send attempt. That means a clean no-op run still does not prove Gmail auth works, that the configured state backend is usable, that templates or `EMAIL_SUBJECT_TEMPLATE` render successfully, or that the image file's bytes are readable and valid for sending; those failures can stay hidden until the first real birthday send. Operators who want continuous readiness signal should periodically exercise the real send path deliberately, such as a scheduled `DRY_RUN=false` run against a synthetic test recipient/date via `TEST_DATE` outside the normal daily schedule, rather than treating an ordinary day's clean exit as proof the send path works.
 
 ## TEST_DATE Testing
 
@@ -378,6 +380,15 @@ Primary supported cloud target:
 This is the recommended target because the application depends on a local SQLite database using WAL mode and real POSIX file locking for duplicate-send protection.
 
 Do not use Cloud Run Jobs native volume mounts for `STATE_DB_PATH`. Those mounts use Cloud Storage FUSE, which is unsafe for this app's SQLite/WAL state store and can break locking guarantees or corrupt state. That makes duplicate-send protection unreliable. Cloud Run Jobs with GCS FUSE must not be used for persistent state for this project.
+
+Cloud Run Jobs is supported when you switch to Firestore-backed state:
+
+- Set `STATE_BACKEND=firestore`
+- Do not set `STATE_DB_PATH`
+- Ensure the Cloud Run Job service account has Firestore access in the target Google Cloud project
+- Firestore authentication uses Google Application Default Credentials automatically; do not mount or hardcode a Firestore credential file just for state
+
+With `STATE_BACKEND=firestore`, the app keeps the same claim/lease/deduplication semantics while moving state coordination to Firestore transactions instead of local SQLite locking.
 
 GKE can work if you use a real block-storage-backed PersistentVolumeClaim instead of object or network-backed storage, but it also requires Kubernetes-specific writable-volume setup for uid `1000` such as `securityContext` / `fsGroup` or an init container. That setup is beyond this README.
 

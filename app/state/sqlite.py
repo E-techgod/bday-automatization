@@ -2,13 +2,19 @@ from __future__ import annotations
 
 import sqlite3
 import time
-import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from enum import Enum
 from pathlib import Path
 from typing import TypeVar
+
+from app.state.base import (
+    ClaimOutcome,
+    ClaimResult,
+    LeaseLostError,
+    new_lease_token,
+    normalize_email,
+    utc_now_isoformat,
+)
 
 _SQLITE_TIMEOUT_SECONDS = 30
 _INIT_RETRY_DELAY_SECONDS = 0.1
@@ -30,23 +36,6 @@ CREATE TABLE IF NOT EXISTS birthday_sends (
 """
 
 
-class ClaimOutcome(str, Enum):
-    CLAIMED = "claimed"
-    ALREADY_SENT = "already_sent"
-    IN_PROGRESS = "in_progress"
-
-
-class LeaseLostError(RuntimeError):
-    pass
-
-
-@dataclass(frozen=True)
-class ClaimResult:
-    outcome: ClaimOutcome
-    claim_id: int | None = None
-    lease_token: str | None = None
-
-
 class StateStore:
     def __init__(self, db_path: Path, stale_claim_timeout_minutes: int) -> None:
         self._db_path = db_path
@@ -64,13 +53,13 @@ class StateStore:
         self._initialize_connection()
 
     def claim(self, email: str, month: int, day: int, year: int) -> ClaimResult:
-        email_normalized = email.strip().lower()
+        email_normalized = normalize_email(email)
         return self._run_with_locked_retry(
             lambda: self._claim_once(email_normalized, month, day, year)
         )
 
     def mark_sent(self, claim_id: int, lease_token: str) -> None:
-        sent_at = _utc_now_isoformat()
+        sent_at = utc_now_isoformat()
         self._run_pending_transition(
             """
             UPDATE birthday_sends
@@ -106,7 +95,7 @@ class StateStore:
     ) -> ClaimResult:
         now = datetime.now(UTC)
         now_iso = _isoformat(now)
-        lease_token = _new_lease_token()
+        lease_token = new_lease_token()
         self._connection.execute("BEGIN IMMEDIATE")
         try:
             try:
@@ -181,7 +170,7 @@ class StateStore:
                 return ClaimResult(ClaimOutcome.IN_PROGRESS)
 
         if status in {"failed", "pending"}:
-            lease_token = _new_lease_token()
+            lease_token = new_lease_token()
             cursor = self._connection.execute(
                 """
                 UPDATE birthday_sends
@@ -246,18 +235,8 @@ class StateStore:
                 if time.monotonic() >= deadline:
                     raise
                 time.sleep(_INIT_RETRY_DELAY_SECONDS)
-
-
-def _utc_now_isoformat() -> str:
-    return _isoformat(datetime.now(UTC))
-
-
 def _isoformat(value: datetime) -> str:
     return value.isoformat()
-
-
-def _new_lease_token() -> str:
-    return uuid.uuid4().hex
 
 
 _T = TypeVar("_T")
