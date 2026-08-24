@@ -45,4 +45,6 @@ COPY run.py ./run.py
 
 USER appuser
 
-ENTRYPOINT ["python", "run.py"]
+COPY entrypoint.sh /app/entrypoint.sh
+
+ENTRYPOINT ["/app/entrypoint.sh"]
