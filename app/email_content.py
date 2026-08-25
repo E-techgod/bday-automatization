@@ -5,7 +5,8 @@ from typing import Final
 from jinja2 import DictLoader, Environment, select_autoescape
 
 # ¡Feliz cumpleaños, {{ name ~ ' ' ~ last_name }}! 🎉
-EMAIL_SUBJECT_TEMPLATE_DEFAULT: Final = "Feliz cumpleaños, {{ display_name }}! 🎉"
+# "Feliz cumpleaños, {{ display_name }}! 🎉"
+EMAIL_SUBJECT_TEMPLATE_DEFAULT: Final = "!Feliz cumpleaños, {{ name }}! 🎉"
 
 ####################### THE ONE CURRENLTY USING ####################
 ######################## TO Modify From Name and Subject template go to .env ###############
