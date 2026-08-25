@@ -481,7 +481,9 @@ def _render_message(
     html_body = html_env.get_template("birthday_email.html").render(template_context)
     text_body = html_env.get_template("birthday_email.txt").render(template_context)
     subject = subject_env.from_string(config.email_subject_template).render(
-        name=client.name
+        name=client.name,
+        last_name=client.last_name,
+        display_name=client.display_name,
     )
     return EmailMessage(
         to_email=client.email,

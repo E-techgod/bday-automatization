@@ -333,4 +333,4 @@ def _http_error(status: int, reason: str) -> HttpError:
 
 
 def _render_subject(name: str) -> str:
-    return EMAIL_SUBJECT_TEMPLATE_DEFAULT.replace("{{name}}", name)
+    return EMAIL_SUBJECT_TEMPLATE_DEFAULT.replace("{{ display_name }}", name)

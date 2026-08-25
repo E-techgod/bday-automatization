@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 
@@ -60,7 +60,7 @@ def test_birthday_today_claims_and_sends(caplog: pytest.LogCaptureFixture) -> No
     assert "birthday email sent to test.person@example.com" in caplog.text
 
 
-def test_birthday_email_uses_first_name_only_when_last_name_present() -> None:
+def test_birthday_email_uses_display_name_in_subject_when_last_name_present() -> None:
     provider = FakeSpreadsheetProvider(
         rows=[
             _row(
@@ -83,10 +83,10 @@ def test_birthday_email_uses_first_name_only_when_last_name_present() -> None:
 
     sent_message = email_provider.sent_messages[0]
     assert sent_message.to_name == "Test"
-    assert "Test Person" not in sent_message.subject
+    assert "Test Person" in sent_message.subject
     assert "Test Person" not in sent_message.html_body
     assert "Test Person" not in sent_message.text_body
-    assert "Test" in sent_message.subject
+    assert sent_message.subject == "Feliz cumpleaños, Test Person! 🎉"
     assert "Test" in sent_message.html_body
     assert "Test" in sent_message.text_body
 
@@ -114,6 +114,36 @@ def test_birthday_email_uses_first_name_only_when_last_name_missing() -> None:
     sent_message = email_provider.sent_messages[0]
     assert sent_message.to_name == "Test"
     assert "Test Person" not in sent_message.subject
+
+
+def test_birthday_email_subject_template_can_use_display_name() -> None:
+    provider = FakeSpreadsheetProvider(
+        rows=[
+            _row(
+                name="Test",
+                last_name="Person",
+                email="test.person@example.com",
+                birthday="1/1/2000",
+            )
+        ]
+    )
+    email_provider = FakeEmailProvider()
+    config = _build_config()
+    config = replace(
+        config,
+        email_subject_template="¡Feliz cumpleaños, {{ display_name }}! 🎉",
+    )
+
+    run_birthday_job(
+        config,
+        spreadsheet_provider=provider,
+        state_store=FakeStateStore(),
+        email_provider=email_provider,
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    sent_message = email_provider.sent_messages[0]
+    assert sent_message.subject == "¡Feliz cumpleaños, Test Person! 🎉"
 
 
 def test_birthday_email_normalizes_whitespace_in_name() -> None:
