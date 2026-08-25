@@ -2,7 +2,7 @@
 
 ## Project Purpose
 
-This project is a single-run daily job that reads client birthdays from a spreadsheet, finds the clients whose birthday is today, sends each matching client a birthday email through Gmail, and uses a local SQLite state store to prevent duplicate sends for the same client/date/year.
+This project is a single-run daily job that reads client birthdays from a spreadsheet, finds the clients whose birthday is today, routes each match to either the standard birthday email path or a BP call-reminder path, and uses a durable state store to prevent duplicate sends for the same client/date/year.
 
 ## Architecture Overview
 
@@ -13,8 +13,9 @@ High-level pipeline:
 3. Read spreadsheet rows from either Google Sheets or a Drive-hosted `.xlsx` file.
 4. Parse each row into a client record and skip invalid rows with warnings.
 5. Match birthdays for today, including the Feb. 29-on-Feb. 28 rule in non-leap years.
-6. Atomically claim each send in SQLite before attempting delivery.
-7. Render the email, send it through Gmail, and record the final result in SQLite.
+6. Atomically claim each delivery in the configured state backend before attempting it.
+7. If `Línea de servicio` contains `BP`, send an internal reminder to call the client instead of emailing the client directly.
+8. Otherwise render the personalized birthday email, send it through Gmail, and record the final result.
 
 `PLAN.md` section 1 is the authoritative detailed design if you want the full implementation flow.
 
@@ -36,7 +37,7 @@ Then fill in `.env` with your real values.
 
 ## Email Editing Workflow
 
-Need to change the birthday email?
+Need to change the birthday email or BP reminder copy?
 
 ```text
 edit app/email_content.py
@@ -46,7 +47,7 @@ uv run pytest
 build + deploy
 ```
 
-`[app/email_content.py](/Users/eliasarellanocampos/EAC/Quiron/happybd-automatization/app/email_content.py)` is the single default source of truth for the birthday email's subject, body templates, greetings, signature wording, and default image settings. Use environment variables only when you intentionally want a deployment-specific override.
+`[app/email_content.py](/Users/eliasarellanocampos/EAC/Quiron/happybd-automatization/app/email_content.py)` is the single default source of truth for the birthday email subject/body, BP reminder subject/body, greetings, signature wording, reminder recipient defaults, and default image settings. Use environment variables only when you intentionally want a deployment-specific override.
 
 ## Google Cloud Configuration
 
@@ -119,8 +120,16 @@ The app resolves these logical columns from the header row:
 - `BIRTHDAY_COLUMN` required
 - `LAST_SENT_YEAR_COLUMN` optional, informational only
 - `GENDER_COLUMN` optional, used only to pick a Spanish salutation
+- `SERVICE_LINE_COLUMN` optional, used to detect `BP` and override the standard email path
+- `MOBILE_PHONE_COLUMN` optional, used only in the BP reminder content
 
-`LAST_SENT_YEAR_COLUMN` is never the duplicate-send source of truth. The SQLite database is.
+`LAST_SENT_YEAR_COLUMN` is never the duplicate-send source of truth. The configured state backend is.
+
+Routing rules:
+
+- If `SERVICE_LINE_COLUMN` contains `BP`, after splitting on common delimiters such as commas, semicolons, or slashes and normalizing case/whitespace, the client goes to the BP override path.
+- The BP override path does not email the client. It sends an internal reminder to `jorge.arellano@quirongroup.com` with the full name, birthday date, mobile phone, and BP status.
+- If `BP` is not present, the standard personalized birthday email path is used.
 
 Accepted birthday values:
 
@@ -176,21 +185,24 @@ Copy `.env.example` to `.env` and fill in every required value for your deployme
 | Variable | Default | Purpose | Required when | Validation / notes |
 |---|---|---|---|---|
 | `APP_TIMEZONE` | `America/Chicago` | Timezone used to compute "today" when `TEST_DATE` is unset | Always | Must be a valid IANA timezone or startup fails |
-| `DRY_RUN` | `true` | Runs the job without sending email or writing SQLite state | Always | Must be `true` or `false` only |
+| `DRY_RUN` | `true` | Runs the job without sending email or writing state | Always | Must be `true` or `false` only |
 | `TEST_DATE` | empty | Overrides today's date for testing | Optional | Must be `YYYY-MM-DD` or startup fails |
 | `SPREADSHEET_MODE` | `google_sheet` | Selects spreadsheet provider | Always | Must be `google_sheet` or `xlsx_drive` |
 | `GOOGLE_SHEET_ID` | empty | Google Sheet ID to read | Required when `SPREADSHEET_MODE=google_sheet` | Required in sheet mode or startup fails |
 | `GOOGLE_SHEET_TAB` | empty | Optional plain sheet/tab name | Optional | Blank reads the default/first sheet; when set, the app always reads that tab's full `A:ZZ` range |
 | `GOOGLE_DRIVE_FILE_ID` | empty | Drive file ID for a shared `.xlsx` workbook | Required when `SPREADSHEET_MODE=xlsx_drive` | Required in Drive mode or startup fails |
 | `NAME_COLUMN` | `Name` | Logical column header for client name | Always | Header matching is normalized by trim + casefold |
+| `LAST_NAME_COLUMN` | `Last Name` | Logical column header for client last name | Always | Used to build `display_name` when present |
+| `GENDER_COLUMN` | `Gender` | Optional column used to pick a gender-aware Spanish salutation | Always | Missing or unrecognized values fall back to `Estimado/a`; never invalidates a row |
+| `SERVICE_LINE_COLUMN` | `Línea de servicio` | Logical column header used for BP override routing | Always | Values are split on commas, semicolons, and `/`, then trim + casefold normalized |
+| `MOBILE_PHONE_COLUMN` | `Móvil` | Logical column header used in BP reminders | Always | Blank or missing values render as `No disponible` in the reminder |
 | `EMAIL_COLUMN` | `Email` | Logical column header for recipient email | Always | Same header normalization rules |
 | `BIRTHDAY_COLUMN` | `Birthday` | Logical column header for birthday values | Always | Same header normalization rules |
 | `LAST_SENT_YEAR_COLUMN` | `Last Birthday Email Year` | Optional informational column from the spreadsheet | Always | Not used for idempotency gating or writes |
-| `GENDER_COLUMN` | `Gender` | Optional column used to pick a gender-aware Spanish salutation | Always | Missing or unrecognized values fall back to `Estimado/a`; never invalidates a row |
 | `EMAIL_PROVIDER` | `gmail` | Email provider selector | Always | Must be `gmail` |
 | `EMAIL_FROM_NAME` | empty | Display name in the `From:` header and template signature | Optional | Can be blank |
 | `EMAIL_FROM_ADDRESS` | empty | Sender mailbox address | Always | Must look like an email address or startup fails |
-| `EMAIL_SUBJECT_TEMPLATE` | `Feliz cumpleaños, {{name}}! 🎉` from `app/email_content.py` | Optional subject override | Always | Leave unset to use the centralized default; rendered with `name`, `last_name`, and `display_name` |
+| `EMAIL_SUBJECT_TEMPLATE` | `Feliz cumpleaños, {{ display_name }}! 🎉` from `app/email_content.py` | Optional subject override | Always | Leave unset to use the centralized default; rendered with `name`, `last_name`, and `display_name` |
 | `GOOGLE_AUTH_MODE` | `service_account` | Selects the Google auth mode | Always | Must be `service_account` or `oauth` |
 | `GOOGLE_CREDENTIALS_FILE` | empty | Service account JSON key file path | Required when `GOOGLE_AUTH_MODE=service_account` | File must exist at startup |
 | `GOOGLE_IMPERSONATE_SUBJECT` | empty | Gmail impersonation subject (service account mode only) | Optional | Must be an email if set; defaults to `EMAIL_FROM_ADDRESS` if blank |
@@ -225,10 +237,13 @@ GOOGLE_SHEET_TAB=
 GOOGLE_DRIVE_FILE_ID=
 
 NAME_COLUMN=Name
+LAST_NAME_COLUMN=Last Name
+GENDER_COLUMN=Gender
+SERVICE_LINE_COLUMN=Línea de servicio
+MOBILE_PHONE_COLUMN=Móvil
 EMAIL_COLUMN=Email
 BIRTHDAY_COLUMN=Birthday
 LAST_SENT_YEAR_COLUMN=Last Birthday Email Year
-GENDER_COLUMN=Gender
 
 EMAIL_PROVIDER=gmail
 EMAIL_FROM_NAME=
@@ -283,8 +298,9 @@ DRY_RUN=true
 
 Dry run executes config loading, spreadsheet read, row parsing, and birthday matching, but it stops before claim, render, and send. It does not:
 
-- send email
-- claim or update SQLite send state
+- send the client birthday email
+- send the BP internal reminder
+- claim or update send state in SQLite or Firestore
 
 Use it when validating configuration, spreadsheet parsing, and birthday matching without affecting real recipients or duplicate-send protection state.
 

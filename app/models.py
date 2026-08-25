@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from typing import Literal
 
 from app.email_content import (
     DEFAULT_SALUTATION,
     FEMALE_SALUTATION,
     MALE_SALUTATION,
 )
+
+DeliveryRoute = Literal["birthday_email", "bp_call_reminder"]
 
 
 def build_display_name(first_name: str, last_name: str | None) -> str:
@@ -51,6 +54,9 @@ class Client:
     last_sent_year: int | None = None
     last_name: str | None = None
     gender: str | None = None
+    mobile_phone: str | None = None
+    service_lines: tuple[str, ...] = ()
+    delivery_route: DeliveryRoute = "birthday_email"
 
     @property
     def display_name(self) -> str:

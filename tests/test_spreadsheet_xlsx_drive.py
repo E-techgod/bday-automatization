@@ -397,6 +397,8 @@ def _build_config() -> Config:
         name_column="Name",
         last_name_column="Last Name",
         gender_column="Gender",
+        service_line_column="Línea de servicio",
+        mobile_phone_column="Móvil",
         email_column="Email",
         birthday_column="Birthday",
         last_sent_year_column="Last Birthday Email Year",

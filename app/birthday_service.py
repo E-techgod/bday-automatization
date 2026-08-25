@@ -4,6 +4,7 @@ import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -26,13 +27,18 @@ from app.email.base import (
     InlineImage,
 )
 from app.email_content import (
+    BP_FOLLOW_UP_TEXT,
+    BP_REMINDER_SUBJECT_TEMPLATE,
+    BP_REMINDER_TO_ADDRESS_DEFAULT,
+    BP_REMINDER_TO_NAME_DEFAULT,
+    BP_STATUS_LABEL,
     INLINE_IMAGE_CONTENT_ID,
     SIGNATURE_CLOSING,
     SIGNATURE_INTRO,
     build_email_template_environment,
 )
 from app.email.gmail import GmailProvider
-from app.models import Client
+from app.models import Client, DeliveryRoute
 from app.spreadsheet.base import SpreadsheetProvider
 from app.spreadsheet.google_sheets import GoogleSheetsProvider
 from app.spreadsheet.xlsx_drive import XlsxDriveProvider
@@ -52,6 +58,7 @@ _DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 # accounts, since an installed-app flow can't silently re-consent mid-run.
 _OAUTH_SCOPES = [_GMAIL_SCOPE, _SHEETS_SCOPE, _DRIVE_SCOPE]
 _UNSET = object()
+_SERVICE_LINE_SPLIT_RE = re.compile(r"[,;/]+")
 
 
 @dataclass(frozen=True)
@@ -287,6 +294,11 @@ def _parse_client_row(
         last_sent_year=_parse_last_sent_year(row.get(config.last_sent_year_column)),
         last_name=_parse_name(row.get(config.last_name_column)),
         gender=_parse_gender(row.get(config.gender_column)),
+        mobile_phone=_parse_mobile_phone(row.get(config.mobile_phone_column)),
+        service_lines=_parse_service_lines(row.get(config.service_line_column)),
+        delivery_route=_resolve_delivery_route(
+            row.get(config.service_line_column),
+        ),
     )
 
 
@@ -315,6 +327,38 @@ def _parse_email(raw: object) -> str | None:
     if not email or _EMAIL_RE.fullmatch(email) is None:
         return None
     return email
+
+
+def _parse_mobile_phone(raw: object) -> str | None:
+    if isinstance(raw, str):
+        phone = raw.strip()
+        return phone or None
+    if isinstance(raw, int) and not isinstance(raw, bool):
+        return str(raw)
+    if isinstance(raw, float) and raw.is_integer():
+        return str(int(raw))
+    return None
+
+
+def _parse_service_lines(raw: object) -> tuple[str, ...]:
+    if not isinstance(raw, str):
+        return ()
+    values = []
+    for value in _SERVICE_LINE_SPLIT_RE.split(raw):
+        normalized = value.strip()
+        if normalized:
+            values.append(normalized)
+    return tuple(values)
+
+
+def _contains_bp_service_line(raw: object) -> bool:
+    return any(value.casefold() == "bp" for value in _parse_service_lines(raw))
+
+
+def _resolve_delivery_route(raw_service_line: object) -> DeliveryRoute:
+    if _contains_bp_service_line(raw_service_line):
+        return "bp_call_reminder"
+    return "birthday_email"
 
 
 def _parse_last_sent_year(raw: object) -> int | None:
@@ -373,11 +417,7 @@ def _process_match(
     summary: Summary,
 ) -> Summary:
     if config.dry_run:
-        LOGGER.info(
-            "[DRY RUN] would send birthday email to %s (%s)",
-            client.email,
-            client.name,
-        )
+        _log_dry_run(client)
         return summary
 
     claim_result: ClaimResult | None = None
@@ -419,7 +459,7 @@ def _process_match(
                 exc_info=True,
             )
             return _with_increment(summary, ambiguous=1)
-        LOGGER.info("birthday email sent to %s", client.email)
+        _log_sent_message(client, message)
         return _with_increment(summary, sent=1)
     except AmbiguousSendError:
         LOGGER.critical(
@@ -466,6 +506,31 @@ def _render_message(
     subject_env: Environment,
     get_inline_image: Callable[[], InlineImage | None],
 ) -> EmailMessage:
+    if client.delivery_route == "bp_call_reminder":
+        return _render_bp_call_reminder(
+            config=config,
+            client=client,
+            html_env=html_env,
+            subject_env=subject_env,
+        )
+
+    return _render_birthday_email(
+        config=config,
+        client=client,
+        html_env=html_env,
+        subject_env=subject_env,
+        get_inline_image=get_inline_image,
+    )
+
+
+def _render_birthday_email(
+    *,
+    config: Config,
+    client: Client,
+    html_env: Environment,
+    subject_env: Environment,
+    get_inline_image: Callable[[], InlineImage | None],
+) -> EmailMessage:
     template_context = {
         "name": client.name,
         "salutation": client.salutation,
@@ -495,6 +560,69 @@ def _render_message(
         text_body=text_body,
         inline_image=get_inline_image(),
     )
+
+
+def _render_bp_call_reminder(
+    *,
+    config: Config,
+    client: Client,
+    html_env: Environment,
+    subject_env: Environment,
+) -> EmailMessage:
+    template_context = {
+        "display_name": client.display_name,
+        "birthday_date": _format_birthday_date(client.birthday),
+        "mobile_phone": client.mobile_phone or "No disponible",
+        "bp_status": BP_STATUS_LABEL,
+        "bp_follow_up_text": BP_FOLLOW_UP_TEXT,
+    }
+    html_body = html_env.get_template("bp_call_reminder.html").render(template_context)
+    text_body = html_env.get_template("bp_call_reminder.txt").render(template_context)
+    subject = subject_env.from_string(BP_REMINDER_SUBJECT_TEMPLATE).render(
+        name=client.name,
+        last_name=client.last_name,
+        display_name=client.display_name,
+    )
+    return EmailMessage(
+        to_email=BP_REMINDER_TO_ADDRESS_DEFAULT,
+        to_name=BP_REMINDER_TO_NAME_DEFAULT,
+        from_name=config.email_from_name,
+        from_address=config.email_from_address,
+        subject=subject,
+        html_body=html_body,
+        text_body=text_body,
+        inline_image=None,
+    )
+
+
+def _format_birthday_date(value: date) -> str:
+    return value.isoformat()
+
+
+def _log_dry_run(client: Client) -> None:
+    if client.delivery_route == "bp_call_reminder":
+        LOGGER.info(
+            "[DRY RUN] would send BP birthday call reminder for %s to %s",
+            client.display_name,
+            BP_REMINDER_TO_ADDRESS_DEFAULT,
+        )
+        return
+    LOGGER.info(
+        "[DRY RUN] would send birthday email to %s (%s)",
+        client.email,
+        client.name,
+    )
+
+
+def _log_sent_message(client: Client, message: EmailMessage) -> None:
+    if client.delivery_route == "bp_call_reminder":
+        LOGGER.info(
+            "BP birthday call reminder sent for %s to %s",
+            client.email,
+            message.to_email,
+        )
+        return
+    LOGGER.info("birthday email sent to %s", client.email)
 
 
 def _with_increment(
