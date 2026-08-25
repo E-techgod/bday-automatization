@@ -9,7 +9,16 @@ from typing import IO, Literal
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
-EMAIL_SUBJECT_TEMPLATE= "EMAIL_SUBJECT_TEMPLATE", "Feliz cumpleaños, {{name}}! 🎉"
+from app.email_content import (
+    DEFAULT_BIRTHDAY_IMAGE_ALT,
+    DEFAULT_BIRTHDAY_IMAGE_MODE,
+    DEFAULT_BIRTHDAY_IMAGE_PATH,
+    DEFAULT_BIRTHDAY_IMAGE_URL,
+    DEFAULT_BIRTHDAY_IMAGE_WIDTH,
+    EMAIL_SUBJECT_TEMPLATE_DEFAULT,
+)
+
+EMAIL_SUBJECT_TEMPLATE = ("EMAIL_SUBJECT_TEMPLATE", EMAIL_SUBJECT_TEMPLATE_DEFAULT)
 try:
     from dotenv import load_dotenv
 except ImportError:
@@ -45,7 +54,7 @@ StateBackend = Literal["sqlite", "firestore"]
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _TEST_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_DEFAULT_BIRTHDAY_IMAGE_PATH = _PROJECT_ROOT / "app/assets/birthday_banner.jpg"
+_DEFAULT_BIRTHDAY_IMAGE_PATH = _PROJECT_ROOT / DEFAULT_BIRTHDAY_IMAGE_PATH
 _DEFAULT_STATE_DB_PATH = _PROJECT_ROOT / "data/birthday_state.db"
 _DEFAULT_GOOGLE_OAUTH_TOKEN_PATH = _PROJECT_ROOT / "data/google_oauth_token.json"
 _DEFAULT_FIRESTORE_DATABASE = "birthday-automation"
@@ -116,12 +125,19 @@ def load_config() -> Config:
         "GOOGLE_OAUTH_TOKEN_PERSIST",
         _get_env("GOOGLE_OAUTH_TOKEN_PERSIST", "true"),
     )
-    birthday_image_mode = _parse_image_mode(_get_env("BIRTHDAY_IMAGE_MODE", "local"))
+    birthday_image_mode = _parse_image_mode(
+        _get_optional_override_env("BIRTHDAY_IMAGE_MODE")
+        or DEFAULT_BIRTHDAY_IMAGE_MODE
+    )
     birthday_image_path = _load_birthday_image_path()
-    birthday_image_url = _get_env("BIRTHDAY_IMAGE_URL", "")
+    birthday_image_url = (
+        _get_optional_override_env("BIRTHDAY_IMAGE_URL")
+        or DEFAULT_BIRTHDAY_IMAGE_URL
+    )
     birthday_image_width = _parse_positive_int(
         "BIRTHDAY_IMAGE_WIDTH",
-        _get_env("BIRTHDAY_IMAGE_WIDTH", "600"),
+        _get_optional_override_env("BIRTHDAY_IMAGE_WIDTH")
+        or str(DEFAULT_BIRTHDAY_IMAGE_WIDTH),
     )
     state_backend = _parse_state_backend(_get_env("STATE_BACKEND", "sqlite"))
 
@@ -158,7 +174,10 @@ def load_config() -> Config:
         email_provider=email_provider,
         email_from_name=_get_env("EMAIL_FROM_NAME", ""),
         email_from_address=email_from_address,
-        email_subject_template = _get_env(*EMAIL_SUBJECT_TEMPLATE),
+        email_subject_template=(
+            _get_optional_override_env(EMAIL_SUBJECT_TEMPLATE[0])
+            or EMAIL_SUBJECT_TEMPLATE[1]
+        ),
         google_auth_mode=google_auth_mode,
         google_credentials_file=google_credentials_file,
         google_impersonate_subject=google_impersonate_subject,
@@ -168,7 +187,10 @@ def load_config() -> Config:
         birthday_image_mode=birthday_image_mode,
         birthday_image_path=birthday_image_path,
         birthday_image_url=birthday_image_url,
-        birthday_image_alt=_get_env("BIRTHDAY_IMAGE_ALT", "Happy Birthday"),
+        birthday_image_alt=(
+            _get_optional_override_env("BIRTHDAY_IMAGE_ALT")
+            or DEFAULT_BIRTHDAY_IMAGE_ALT
+        ),
         birthday_image_width=birthday_image_width,
         state_backend=state_backend,
         state_db_path=_load_state_db_path(state_backend),
@@ -198,8 +220,18 @@ def _get_env(name: str, default: str | None = None) -> str:
     return value
 
 
+def _get_optional_override_env(name: str) -> str | None:
+    value = os.environ.get(name)
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    return stripped
+
+
 def _load_birthday_image_path() -> Path:
-    configured_path = os.environ.get("BIRTHDAY_IMAGE_PATH")
+    configured_path = _get_optional_override_env("BIRTHDAY_IMAGE_PATH")
     if configured_path is None:
         return _DEFAULT_BIRTHDAY_IMAGE_PATH
     return _resolve_project_relative_path(configured_path)
@@ -208,14 +240,14 @@ def _load_birthday_image_path() -> Path:
 def _load_state_db_path(state_backend: StateBackend) -> Path | None:
     if state_backend != "sqlite":
         return None
-    configured_path = os.environ.get("STATE_DB_PATH")
+    configured_path = _get_optional_override_env("STATE_DB_PATH")
     if configured_path is None:
         return _DEFAULT_STATE_DB_PATH
     return _resolve_project_relative_path(configured_path)
 
 
 def _load_google_oauth_token_path() -> Path:
-    configured_path = os.environ.get("GOOGLE_OAUTH_TOKEN_FILE")
+    configured_path = _get_optional_override_env("GOOGLE_OAUTH_TOKEN_FILE")
     if configured_path is None:
         return _DEFAULT_GOOGLE_OAUTH_TOKEN_PATH
     return _resolve_project_relative_path(configured_path)

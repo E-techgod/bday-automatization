@@ -14,6 +14,10 @@ from app.config import (
     ConfigError,
     load_config,
 )
+from app.email_content import (
+    DEFAULT_BIRTHDAY_IMAGE_ALT,
+    EMAIL_SUBJECT_TEMPLATE_DEFAULT,
+)
 
 
 def test_load_config_valid_google_sheet_mode(
@@ -731,13 +735,13 @@ def _set_base_env(
         "EMAIL_PROVIDER": "gmail",
         "EMAIL_FROM_NAME": "Sender Name",
         "EMAIL_FROM_ADDRESS": "sender@example.com",
-        "EMAIL_SUBJECT_TEMPLATE": "Feliz cumpleaños, {{name}}! 🎉",
+        "EMAIL_SUBJECT_TEMPLATE": EMAIL_SUBJECT_TEMPLATE_DEFAULT,
         "GOOGLE_CREDENTIALS_FILE": str(credentials_path),
         "GOOGLE_IMPERSONATE_SUBJECT": "",
         "BIRTHDAY_IMAGE_MODE": "local",
         "BIRTHDAY_IMAGE_PATH": str(image_path),
         "BIRTHDAY_IMAGE_URL": "",
-        "BIRTHDAY_IMAGE_ALT": "Happy Birthday",
+        "BIRTHDAY_IMAGE_ALT": DEFAULT_BIRTHDAY_IMAGE_ALT,
         "BIRTHDAY_IMAGE_WIDTH": "600",
         "STATE_BACKEND": "sqlite",
         "STATE_DB_PATH": "data/birthday_state.db",

@@ -3,6 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
+from app.email_content import (
+    DEFAULT_SALUTATION,
+    FEMALE_SALUTATION,
+    MALE_SALUTATION,
+)
+
 
 def build_display_name(first_name: str, last_name: str | None) -> str:
     normalized_first = _normalize_name_part(first_name)
@@ -18,9 +24,6 @@ def _normalize_name_part(value: str) -> str:
 
 _FEMALE_GENDER_VALUES = frozenset({"mujer", "femenino", "f", "female"})
 _MALE_GENDER_VALUES = frozenset({"hombre", "masculino", "m", "male"})
-_DEFAULT_SALUTATION = "Estimado/a"
-_FEMALE_SALUTATION = "Estimada"
-_MALE_SALUTATION = "Estimado"
 
 
 def normalize_gender(gender: str | None) -> str | None:
@@ -33,10 +36,10 @@ def normalize_gender(gender: str | None) -> str | None:
 def resolve_salutation(gender: str | None) -> str:
     normalized = normalize_gender(gender)
     if normalized in _FEMALE_GENDER_VALUES:
-        return _FEMALE_SALUTATION
+        return FEMALE_SALUTATION
     if normalized in _MALE_GENDER_VALUES:
-        return _MALE_SALUTATION
-    return _DEFAULT_SALUTATION
+        return MALE_SALUTATION
+    return DEFAULT_SALUTATION
 
 
 @dataclass(frozen=True)

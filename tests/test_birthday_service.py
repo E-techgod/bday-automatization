@@ -15,6 +15,13 @@ from app.birthday_service import (
     run_birthday_job,
 )
 from app.config import Config, ConfigError
+from app.email_content import (
+    DEFAULT_BIRTHDAY_IMAGE_ALT,
+    DEFAULT_SALUTATION,
+    EMAIL_SUBJECT_TEMPLATE_DEFAULT,
+    FEMALE_SALUTATION,
+    MALE_SALUTATION,
+)
 from app.email.base import (
     AmbiguousSendError,
     EmailMessage,
@@ -154,8 +161,8 @@ def test_birthday_email_uses_estimada_salutation_for_female_gender() -> None:
         clock=FixedClock(date(2026, 1, 1)),
     )
 
-    assert "Estimada" in email_provider.sent_messages[0].html_body
-    assert "Estimado/a" not in email_provider.sent_messages[0].html_body
+    assert FEMALE_SALUTATION in email_provider.sent_messages[0].html_body
+    assert DEFAULT_SALUTATION not in email_provider.sent_messages[0].html_body
 
 
 def test_birthday_email_uses_estimado_salutation_for_male_gender() -> None:
@@ -180,8 +187,8 @@ def test_birthday_email_uses_estimado_salutation_for_male_gender() -> None:
     )
 
     html_body = email_provider.sent_messages[0].html_body
-    assert "Estimado <strong>" in html_body
-    assert "Estimado/a" not in html_body
+    assert f"{MALE_SALUTATION} <strong>" in html_body
+    assert DEFAULT_SALUTATION not in html_body
 
 
 def test_birthday_email_defaults_salutation_when_gender_missing() -> None:
@@ -204,7 +211,7 @@ def test_birthday_email_defaults_salutation_when_gender_missing() -> None:
         clock=FixedClock(date(2026, 1, 1)),
     )
 
-    assert "Estimado/a" in email_provider.sent_messages[0].html_body
+    assert DEFAULT_SALUTATION in email_provider.sent_messages[0].html_body
 
 
 def test_birthday_email_defaults_salutation_when_gender_unknown() -> None:
@@ -228,7 +235,7 @@ def test_birthday_email_defaults_salutation_when_gender_unknown() -> None:
         clock=FixedClock(date(2026, 1, 1)),
     )
 
-    assert "Estimado/a" in email_provider.sent_messages[0].html_body
+    assert DEFAULT_SALUTATION in email_provider.sent_messages[0].html_body
 
 
 def test_invalid_gender_value_does_not_invalidate_row() -> None:
@@ -1656,7 +1663,7 @@ def _build_config(
         email_provider="gmail",
         email_from_name="Example Sender",
         email_from_address="sender@example.com",
-        email_subject_template="Happy Birthday, {{name}}! 🎉",
+        email_subject_template=EMAIL_SUBJECT_TEMPLATE_DEFAULT,
         google_auth_mode=google_auth_mode,
         google_credentials_file=google_credentials_file,
         google_impersonate_subject="sender@example.com",
@@ -1666,7 +1673,7 @@ def _build_config(
         birthday_image_mode=birthday_image_mode,
         birthday_image_path=birthday_image_path,
         birthday_image_url="https://assets.example.com/birthday-banner.jpg",
-        birthday_image_alt="Happy Birthday banner",
+        birthday_image_alt=DEFAULT_BIRTHDAY_IMAGE_ALT,
         birthday_image_width=600,
         state_backend="sqlite",
         state_db_path=Path("synthetic-state.db"),

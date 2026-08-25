@@ -34,6 +34,20 @@ cp .env.example .env
 
 Then fill in `.env` with your real values.
 
+## Email Editing Workflow
+
+Need to change the birthday email?
+
+```text
+edit app/email_content.py
+    ↓
+uv run pytest
+    ↓
+build + deploy
+```
+
+`[app/email_content.py](/Users/eliasarellanocampos/EAC/Quiron/happybd-automatization/app/email_content.py)` is the single default source of truth for the birthday email's subject, body templates, greetings, signature wording, and default image settings. Use environment variables only when you intentionally want a deployment-specific override.
+
 ## Google Cloud Configuration
 
 This project authenticates to Google APIs in one of two modes, selected by `GOOGLE_AUTH_MODE`:
@@ -176,18 +190,18 @@ Copy `.env.example` to `.env` and fill in every required value for your deployme
 | `EMAIL_PROVIDER` | `gmail` | Email provider selector | Always | Must be `gmail` |
 | `EMAIL_FROM_NAME` | empty | Display name in the `From:` header and template signature | Optional | Can be blank |
 | `EMAIL_FROM_ADDRESS` | empty | Sender mailbox address | Always | Must look like an email address or startup fails |
-| `EMAIL_SUBJECT_TEMPLATE` | `Feliz Cumpleaños {{name}}! 🎉` | Jinja2 subject template | Always | Rendered with `name` |
+| `EMAIL_SUBJECT_TEMPLATE` | `Feliz cumpleaños, {{name}}! 🎉` from `app/email_content.py` | Optional subject override | Always | Leave unset to use the centralized default; rendered with `name` |
 | `GOOGLE_AUTH_MODE` | `service_account` | Selects the Google auth mode | Always | Must be `service_account` or `oauth` |
 | `GOOGLE_CREDENTIALS_FILE` | empty | Service account JSON key file path | Required when `GOOGLE_AUTH_MODE=service_account` | File must exist at startup |
 | `GOOGLE_IMPERSONATE_SUBJECT` | empty | Gmail impersonation subject (service account mode only) | Optional | Must be an email if set; defaults to `EMAIL_FROM_ADDRESS` if blank |
 | `GOOGLE_OAUTH_CLIENT_SECRETS_FILE` | empty | OAuth "Desktop app" client JSON path | Required when `GOOGLE_AUTH_MODE=oauth` | File must exist at startup |
 | `GOOGLE_OAUTH_TOKEN_FILE` | `data/google_oauth_token.json` | Cached OAuth user token path | Used only when `GOOGLE_AUTH_MODE=oauth` | Relative to project root; created on first interactive consent |
 | `GOOGLE_OAUTH_TOKEN_PERSIST` | `true` | Controls whether refreshed OAuth user credentials are written back to `GOOGLE_OAUTH_TOKEN_FILE` | Used only when `GOOGLE_AUTH_MODE=oauth` | Set to `false` for read-only token mounts such as Cloud Run Secret Manager volumes |
-| `BIRTHDAY_IMAGE_MODE` | `local` | Controls birthday image handling | Always | Must be `none`, `local`, or `url` |
-| `BIRTHDAY_IMAGE_PATH` | `app/assets/birthday_banner.jpg` | Local inline image file path | Required when `BIRTHDAY_IMAGE_MODE=local` | File must exist at startup |
-| `BIRTHDAY_IMAGE_URL` | empty | Remote image URL for email template | Required when `BIRTHDAY_IMAGE_MODE=url` | Must be an `https://` URL |
-| `BIRTHDAY_IMAGE_ALT` | `Happy Birthday` | HTML alt text for the image | Always | Plain text value |
-| `BIRTHDAY_IMAGE_WIDTH` | `600` | HTML width for the image | Always | Must be a positive integer |
+| `BIRTHDAY_IMAGE_MODE` | `local` from `app/email_content.py` | Optional image mode override | Always | Must be `none`, `local`, or `url` |
+| `BIRTHDAY_IMAGE_PATH` | `app/assets/birthday_banner.jpg` from `app/email_content.py` | Optional local image path override | Required when `BIRTHDAY_IMAGE_MODE=local` | File must exist at startup |
+| `BIRTHDAY_IMAGE_URL` | empty from `app/email_content.py` | Optional remote image URL override | Required when `BIRTHDAY_IMAGE_MODE=url` | Must be an `https://` URL |
+| `BIRTHDAY_IMAGE_ALT` | `Happy Birthday` from `app/email_content.py` | Optional HTML alt text override | Always | Leave unset to use the centralized default |
+| `BIRTHDAY_IMAGE_WIDTH` | `600` from `app/email_content.py` | Optional HTML width override | Always | Must be a positive integer |
 | `STATE_BACKEND` | `sqlite` | State backend selector | Always | Must be `sqlite` or `firestore` |
 | `STATE_DB_PATH` | `data/birthday_state.db` | SQLite state database path | Only when `STATE_BACKEND=sqlite` | Relative to project root; directory is created automatically |
 | `FIRESTORE_DATABASE` | `birthday-automation` | Firestore database name | Only when `STATE_BACKEND=firestore` | Passed explicitly to the Firestore client |
@@ -219,7 +233,8 @@ GENDER_COLUMN=Gender
 EMAIL_PROVIDER=gmail
 EMAIL_FROM_NAME=
 EMAIL_FROM_ADDRESS=
-EMAIL_SUBJECT_TEMPLATE=Happy Birthday, {{name}}! 🎉
+# Optional override. Edit app/email_content.py to change the default email subject everywhere.
+EMAIL_SUBJECT_TEMPLATE=
 
 GOOGLE_AUTH_MODE=service_account
 
@@ -230,11 +245,12 @@ GOOGLE_OAUTH_CLIENT_SECRETS_FILE=
 GOOGLE_OAUTH_TOKEN_FILE=data/google_oauth_token.json
 GOOGLE_OAUTH_TOKEN_PERSIST=true
 
-BIRTHDAY_IMAGE_MODE=local
-BIRTHDAY_IMAGE_PATH=app/assets/birthday_banner.jpg
+# Optional overrides. Edit app/email_content.py to change the default image settings everywhere.
+BIRTHDAY_IMAGE_MODE=
+BIRTHDAY_IMAGE_PATH=
 BIRTHDAY_IMAGE_URL=
-BIRTHDAY_IMAGE_ALT=Happy Birthday
-BIRTHDAY_IMAGE_WIDTH=600
+BIRTHDAY_IMAGE_ALT=
+BIRTHDAY_IMAGE_WIDTH=
 
 STATE_BACKEND=sqlite
 STATE_DB_PATH=data/birthday_state.db
