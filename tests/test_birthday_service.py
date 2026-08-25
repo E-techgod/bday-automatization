@@ -376,7 +376,7 @@ def test_bp_client_sends_internal_reminder_instead_of_client_email() -> None:
     assert sent_message.subject == "Recordatorio BP: llamada de cumpleaños para Test Person"
     assert "Nombre completo: Test Person" in sent_message.text_body
     assert "Fecha de cumpleaños: 2000-01-01" in sent_message.text_body
-    assert "Móvil: +52 55 1234 5678" in sent_message.text_body
+    assert "Móvil: 525512345678" in sent_message.text_body
     assert f"Estatus: {BP_STATUS_LABEL}" in sent_message.text_body
     assert sent_message.inline_image is None
 
@@ -445,7 +445,21 @@ def test_non_bp_clients_keep_standard_birthday_email_path() -> None:
     assert FEMALE_SALUTATION in sent_message.html_body
 
 
-def test_bp_reminder_uses_default_text_when_mobile_phone_missing() -> None:
+@pytest.mark.parametrize(
+    ("mobile_phone", "expected_mobile_value"),
+    [
+        ("5551234567", "5551234567"),
+        ("55 5123 4567", "5551234567"),
+        ("+52 55 1234 5678", "525512345678"),
+        ("(832) 555-0123", "8325550123"),
+        ("   ", "No disponible"),
+        ("abc def", "No disponible"),
+        ("12-34", "No disponible"),
+    ],
+)
+def test_bp_reminder_normalizes_mobile_phone_for_display(
+    mobile_phone: object, expected_mobile_value: str
+) -> None:
     email_provider = FakeEmailProvider()
 
     run_birthday_job(
@@ -457,7 +471,7 @@ def test_bp_reminder_uses_default_text_when_mobile_phone_missing() -> None:
                     email="no.phone@example.com",
                     birthday="1/1/2000",
                     service_line="BP",
-                    mobile_phone="   ",
+                    mobile_phone=mobile_phone,
                 )
             ]
         ),
@@ -467,7 +481,9 @@ def test_bp_reminder_uses_default_text_when_mobile_phone_missing() -> None:
     )
 
     sent_message = email_provider.sent_messages[0]
-    assert "Móvil: No disponible" in sent_message.text_body
+    assert f"Móvil: {expected_mobile_value}" in sent_message.text_body
+    assert "<strong>Móvil:</strong>" in sent_message.html_body
+    assert expected_mobile_value in sent_message.html_body
 
 
 @pytest.mark.parametrize(

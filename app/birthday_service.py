@@ -59,6 +59,8 @@ _DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 _OAUTH_SCOPES = [_GMAIL_SCOPE, _SHEETS_SCOPE, _DRIVE_SCOPE]
 _UNSET = object()
 _SERVICE_LINE_SPLIT_RE = re.compile(r"[,;/]+")
+_NON_DIGIT_RE = re.compile(r"\D+")
+_MIN_USABLE_PHONE_DIGITS = 7
 
 
 @dataclass(frozen=True)
@@ -331,13 +333,18 @@ def _parse_email(raw: object) -> str | None:
 
 def _parse_mobile_phone(raw: object) -> str | None:
     if isinstance(raw, str):
-        phone = raw.strip()
-        return phone or None
-    if isinstance(raw, int) and not isinstance(raw, bool):
-        return str(raw)
-    if isinstance(raw, float) and raw.is_integer():
-        return str(int(raw))
-    return None
+        text = raw.strip()
+    elif isinstance(raw, int) and not isinstance(raw, bool):
+        text = str(raw)
+    elif isinstance(raw, float) and raw.is_integer():
+        text = str(int(raw))
+    else:
+        return None
+
+    normalized = _NON_DIGIT_RE.sub("", text)
+    if len(normalized) < _MIN_USABLE_PHONE_DIGITS:
+        return None
+    return normalized
 
 
 def _parse_service_lines(raw: object) -> tuple[str, ...]:
