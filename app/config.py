@@ -76,6 +76,8 @@ class Config:
     name_column: str
     last_name_column: str
     gender_column: str
+    service_line_column: str
+    mobile_phone_column: str
     email_column: str
     birthday_column: str
     last_sent_year_column: str
@@ -166,6 +168,8 @@ def load_config() -> Config:
         name_column=_get_env("NAME_COLUMN", "Name"),
         last_name_column=_get_env("LAST_NAME_COLUMN", "Last Name"),
         gender_column=_get_env("GENDER_COLUMN", "Gender"),
+        service_line_column=_get_env("SERVICE_LINE_COLUMN", "Línea de servicio"),
+        mobile_phone_column=_get_env("MOBILE_PHONE_COLUMN", "Móvil"),
         email_column=_get_env("EMAIL_COLUMN", "Email"),
         birthday_column=_get_env("BIRTHDAY_COLUMN", "Birthday"),
         last_sent_year_column=_get_env(

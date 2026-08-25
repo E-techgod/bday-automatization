@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from app.email_content import (
+    BP_FOLLOW_UP_TEXT,
+    BP_STATUS_LABEL,
     DEFAULT_SALUTATION,
     INLINE_IMAGE_CONTENT_ID,
     SIGNATURE_CLOSING,
@@ -84,6 +86,33 @@ def test_birthday_html_template_renders_salutation() -> None:
     )
 
     assert "<p style=\"font-size: 16px; margin: 0 0 16px 0;\">Estimada <strong>Test Person</strong>,</p>" in html_output
+
+
+def test_bp_call_reminder_templates_render_expected_fields() -> None:
+    template_env = build_email_template_environment()
+
+    html_output = template_env.get_template("bp_call_reminder.html").render(
+        display_name="Test Person",
+        birthday_date="2000-01-01",
+        mobile_phone="+52 55 1234 5678",
+        bp_status=BP_STATUS_LABEL,
+        bp_follow_up_text=BP_FOLLOW_UP_TEXT,
+    )
+    text_output = template_env.get_template("bp_call_reminder.txt").render(
+        display_name="Test Person",
+        birthday_date="2000-01-01",
+        mobile_phone="+52 55 1234 5678",
+        bp_status=BP_STATUS_LABEL,
+        bp_follow_up_text=BP_FOLLOW_UP_TEXT,
+    )
+
+    assert "Test Person" in html_output
+    assert "2000-01-01" in html_output
+    assert "+52 55 1234 5678" in html_output
+    assert BP_STATUS_LABEL in html_output
+    assert BP_FOLLOW_UP_TEXT in html_output
+    assert "Nombre completo: Test Person" in text_output
+    assert "Fecha de cumpleaños: 2000-01-01" in text_output
 
 
 def _render_template(

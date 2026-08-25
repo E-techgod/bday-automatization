@@ -75,6 +75,44 @@ def test_load_config_gender_column_uses_configured_value(
     assert config.gender_column == "Género"
 
 
+def test_load_config_service_line_column_defaults_to_linea_de_servicio(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.delenv("SERVICE_LINE_COLUMN", raising=False)
+
+    config = load_config()
+
+    assert config.service_line_column == "Línea de servicio"
+
+
+def test_load_config_mobile_phone_column_defaults_to_movil(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.delenv("MOBILE_PHONE_COLUMN", raising=False)
+
+    config = load_config()
+
+    assert config.mobile_phone_column == "Móvil"
+
+
+def test_load_config_service_and_mobile_columns_use_configured_values(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.setenv("SERVICE_LINE_COLUMN", "Service Line")
+    monkeypatch.setenv("MOBILE_PHONE_COLUMN", "Mobile")
+
+    config = load_config()
+
+    assert config.service_line_column == "Service Line"
+    assert config.mobile_phone_column == "Mobile"
+
+
 @pytest.mark.parametrize(
     ("mode", "missing_var"),
     [
@@ -729,6 +767,8 @@ def _set_base_env(
         "NAME_COLUMN": "Name",
         "LAST_NAME_COLUMN": "Last Name",
         "GENDER_COLUMN": "Gender",
+        "SERVICE_LINE_COLUMN": "Línea de servicio",
+        "MOBILE_PHONE_COLUMN": "Móvil",
         "EMAIL_COLUMN": "Email",
         "BIRTHDAY_COLUMN": "Birthday",
         "LAST_SENT_YEAR_COLUMN": "Last Birthday Email Year",

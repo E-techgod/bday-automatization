@@ -16,6 +16,8 @@ from app.birthday_service import (
 )
 from app.config import Config, ConfigError
 from app.email_content import (
+    BP_REMINDER_TO_ADDRESS_DEFAULT,
+    BP_STATUS_LABEL,
     DEFAULT_BIRTHDAY_IMAGE_ALT,
     DEFAULT_SALUTATION,
     EMAIL_SUBJECT_TEMPLATE_DEFAULT,
@@ -343,6 +345,170 @@ def test_multiple_birthdays_are_processed_independently() -> None:
     assert len(store.mark_sent_calls) == 2
 
 
+def test_bp_client_sends_internal_reminder_instead_of_client_email() -> None:
+    store = FakeStateStore()
+    email_provider = FakeEmailProvider()
+
+    summary = run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="Test",
+                    last_name="Person",
+                    email="test.person@example.com",
+                    birthday="1/1/2000",
+                    service_line="BP",
+                    mobile_phone="+52 55 1234 5678",
+                )
+            ]
+        ),
+        state_store=store,
+        email_provider=email_provider,
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert summary == Summary(inspected=1, matched=1, sent=1)
+    assert store.claim_calls == [("test.person@example.com", 1, 1, 2026)]
+    sent_message = email_provider.sent_messages[0]
+    assert sent_message.to_email == BP_REMINDER_TO_ADDRESS_DEFAULT
+    assert sent_message.to_name == "Jorge Arellano"
+    assert sent_message.subject == "Recordatorio BP: llamada de cumpleaños para Test Person"
+    assert "Nombre completo: Test Person" in sent_message.text_body
+    assert "Fecha de cumpleaños: 2000-01-01" in sent_message.text_body
+    assert "Móvil: +52 55 1234 5678" in sent_message.text_body
+    assert f"Estatus: {BP_STATUS_LABEL}" in sent_message.text_body
+    assert sent_message.inline_image is None
+
+
+@pytest.mark.parametrize(
+    "service_line",
+    [
+        "Vida;BP",
+        "GMM, bp",
+        "GMM / BP",
+        "  Vida;BP, GMM, VIDA  ",
+    ],
+)
+def test_bp_service_line_detection_handles_delimiters_whitespace_and_case(
+    service_line: str,
+) -> None:
+    email_provider = FakeEmailProvider()
+
+    summary = run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="Delimiter Test",
+                    email="delimiter@example.com",
+                    birthday="1/1/2000",
+                    service_line=service_line,
+                )
+            ]
+        ),
+        state_store=FakeStateStore(),
+        email_provider=email_provider,
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert summary == Summary(inspected=1, matched=1, sent=1)
+    assert email_provider.sent_messages[0].to_email == BP_REMINDER_TO_ADDRESS_DEFAULT
+
+
+def test_non_bp_clients_keep_standard_birthday_email_path() -> None:
+    email_provider = FakeEmailProvider()
+
+    summary = run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="Standard",
+                    last_name="Client",
+                    email="standard.client@example.com",
+                    birthday="1/1/2000",
+                    gender="Femenino",
+                    service_line="Vida;GMM",
+                )
+            ]
+        ),
+        state_store=FakeStateStore(),
+        email_provider=email_provider,
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert summary == Summary(inspected=1, matched=1, sent=1)
+    sent_message = email_provider.sent_messages[0]
+    assert sent_message.to_email == "standard.client@example.com"
+    assert sent_message.subject == "Feliz cumpleaños, Standard Client! 🎉"
+    assert FEMALE_SALUTATION in sent_message.html_body
+
+
+def test_bp_reminder_uses_default_text_when_mobile_phone_missing() -> None:
+    email_provider = FakeEmailProvider()
+
+    run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="No Phone",
+                    email="no.phone@example.com",
+                    birthday="1/1/2000",
+                    service_line="BP",
+                    mobile_phone="   ",
+                )
+            ]
+        ),
+        state_store=FakeStateStore(),
+        email_provider=email_provider,
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    sent_message = email_provider.sent_messages[0]
+    assert "Móvil: No disponible" in sent_message.text_body
+
+
+@pytest.mark.parametrize(
+    ("service_line", "expected_recipient"),
+    [
+        ("BP", BP_REMINDER_TO_ADDRESS_DEFAULT),
+        ("Vida", "idempotent@example.com"),
+    ],
+)
+def test_duplicate_prevention_applies_to_bp_and_standard_paths(
+    service_line: str,
+    expected_recipient: str,
+) -> None:
+    store = FakeStateStore(
+        claim_results=[ClaimResult(ClaimOutcome.ALREADY_SENT)],
+    )
+    email_provider = FakeEmailProvider()
+
+    summary = run_birthday_job(
+        _build_config(),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="Idempotent",
+                    email="idempotent@example.com",
+                    birthday="1/1/2000",
+                    service_line=service_line,
+                )
+            ]
+        ),
+        state_store=store,
+        email_provider=email_provider,
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert summary == Summary(inspected=1, matched=1, duplicates=1)
+    assert store.mark_sent_calls == []
+    assert email_provider.sent_messages == []
+    assert expected_recipient
+
+
 def test_invalid_rows_are_skipped_and_do_not_block_valid_rows(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -413,6 +579,40 @@ def test_dry_run_does_not_claim_or_send(caplog: pytest.LogCaptureFixture) -> Non
         "[DRY RUN] would send birthday email to test.person@example.com (Test Person)"
         in caplog.text
     )
+
+
+def test_dry_run_bp_route_does_not_claim_or_send(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    config = _build_config(dry_run=True)
+    store = FakeStateStore()
+    email_provider = FakeEmailProvider()
+
+    with caplog.at_level(logging.INFO):
+        summary = run_birthday_job(
+            config,
+            spreadsheet_provider=FakeSpreadsheetProvider(
+                rows=[
+                    _row(
+                        name="BP Dry Run",
+                        email="bp.dry.run@example.com",
+                        birthday="1/1/2000",
+                        service_line=" bp ",
+                    )
+                ]
+            ),
+            state_store=store,
+            email_provider=email_provider,
+            clock=FixedClock(date(2026, 1, 1)),
+        )
+
+    assert summary == Summary(inspected=1, matched=1)
+    assert store.claim_calls == []
+    assert email_provider.sent_messages == []
+    assert (
+        "[DRY RUN] would send BP birthday call reminder for BP Dry Run to "
+        f"{BP_REMINDER_TO_ADDRESS_DEFAULT}"
+    ) in caplog.text
 
 
 def test_dry_run_with_matching_rows_does_not_build_email_provider(
@@ -1687,6 +1887,8 @@ def _build_config(
         name_column="Name",
         last_name_column="Last Name",
         gender_column="Gender",
+        service_line_column="Línea de servicio",
+        mobile_phone_column="Móvil",
         email_column="Email",
         birthday_column="Birthday",
         last_sent_year_column="Last Birthday Email Year",
@@ -1722,6 +1924,8 @@ def _row(
     birthday: object,
     last_name: object = None,
     gender: object = None,
+    service_line: object = None,
+    mobile_phone: object = None,
 ) -> dict[str, object]:
     row: dict[str, object] = {
         "Name": name,
@@ -1732,6 +1936,10 @@ def _row(
         row["Last Name"] = last_name
     if gender is not None:
         row["Gender"] = gender
+    if service_line is not None:
+        row["Línea de servicio"] = service_line
+    if mobile_phone is not None:
+        row["Móvil"] = mobile_phone
     return row
 
 
