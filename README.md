@@ -128,7 +128,8 @@ The app resolves these logical columns from the header row:
 Routing rules:
 
 - If `SERVICE_LINE_COLUMN` contains `BP`, after splitting on common delimiters such as commas, semicolons, or slashes and normalizing case/whitespace, the client goes to the BP override path.
-- The BP override path does not email the client. It sends an internal reminder to `jorge.arellano@quirongroup.com` with the full name, birthday date, mobile phone, and BP status.
+- The BP override path does not email the client. It sends an internal reminder to `jorge.arellano@quirongroup.com` with the full name, birthday date, BP status, and a normalized mobile phone number from `MOBILE_PHONE_COLUMN`.
+- BP reminder phone handling removes every non-digit character from `Móvil` and keeps only `0-9`. If the normalized result has fewer than 7 digits, the reminder renders `Móvil: No disponible` and still sends the reminder.
 - If `BP` is not present, the standard personalized birthday email path is used.
 
 Accepted birthday values:
@@ -191,11 +192,11 @@ Copy `.env.example` to `.env` and fill in every required value for your deployme
 | `GOOGLE_SHEET_ID` | empty | Google Sheet ID to read | Required when `SPREADSHEET_MODE=google_sheet` | Required in sheet mode or startup fails |
 | `GOOGLE_SHEET_TAB` | empty | Optional plain sheet/tab name | Optional | Blank reads the default/first sheet; when set, the app always reads that tab's full `A:ZZ` range |
 | `GOOGLE_DRIVE_FILE_ID` | empty | Drive file ID for a shared `.xlsx` workbook | Required when `SPREADSHEET_MODE=xlsx_drive` | Required in Drive mode or startup fails |
-| `NAME_COLUMN` | `Name` | Logical column header for client name | Always | Header matching is normalized by trim + casefold |
+| `NAME_COLUMN` | `Name` | Logical column header for client name | Always | Header matching is normalized by trim + casefold + diacritic removal |
 | `LAST_NAME_COLUMN` | `Last Name` | Logical column header for client last name | Always | Used to build `display_name` when present |
 | `GENDER_COLUMN` | `Gender` | Optional column used to pick a gender-aware Spanish salutation | Always | Missing or unrecognized values fall back to `Estimado/a`; never invalidates a row |
-| `SERVICE_LINE_COLUMN` | `Línea de servicio` | Logical column header used for BP override routing | Always | Values are split on commas, semicolons, and `/`, then trim + casefold normalized |
-| `MOBILE_PHONE_COLUMN` | `Móvil` | Logical column header used in BP reminders | Always | Blank or missing values render as `No disponible` in the reminder |
+| `SERVICE_LINE_COLUMN` | `Línea de servicio` | Logical column header used for BP override routing | Always | Values are split on commas, semicolons, and `/`, then trim + casefold normalized; header matching is also diacritic-insensitive, so `Linea de Servicio` works |
+| `MOBILE_PHONE_COLUMN` | `Móvil` | Logical column header used in BP reminders | Always | Header matching is diacritic-insensitive, so `Movil` works; values are normalized to digits only, and fewer than 7 digits renders as `No disponible` |
 | `EMAIL_COLUMN` | `Email` | Logical column header for recipient email | Always | Same header normalization rules |
 | `BIRTHDAY_COLUMN` | `Birthday` | Logical column header for birthday values | Always | Same header normalization rules |
 | `LAST_SENT_YEAR_COLUMN` | `Last Birthday Email Year` | Optional informational column from the spreadsheet | Always | Not used for idempotency gating or writes |
