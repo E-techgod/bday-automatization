@@ -11,6 +11,10 @@ from openpyxl import Workbook
 
 from app.birthday_rules import parse_birthday
 from app.config import Config
+from app.email_content import (
+    DEFAULT_BIRTHDAY_IMAGE_ALT,
+    EMAIL_SUBJECT_TEMPLATE_DEFAULT,
+)
 from app.spreadsheet.base import SpreadsheetError
 from app.spreadsheet.base import resolve_headers as base_resolve_headers
 from app.spreadsheet.xlsx_drive import XlsxDriveProvider
@@ -399,7 +403,7 @@ def _build_config() -> Config:
         email_provider="gmail",
         email_from_name="Test Sender",
         email_from_address="sender@example.com",
-        email_subject_template="Happy Birthday, {{name}}!",
+        email_subject_template=EMAIL_SUBJECT_TEMPLATE_DEFAULT,
         google_auth_mode="service_account",
         google_credentials_file=Path("synthetic-credentials.json"),
         google_impersonate_subject="sender@example.com",
@@ -409,7 +413,7 @@ def _build_config() -> Config:
         birthday_image_mode="none",
         birthday_image_path=Path("synthetic-banner.png"),
         birthday_image_url="",
-        birthday_image_alt="Happy Birthday",
+        birthday_image_alt=DEFAULT_BIRTHDAY_IMAGE_ALT,
         birthday_image_width=600,
         state_backend="sqlite",
         state_db_path=Path("synthetic-state.db"),

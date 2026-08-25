@@ -14,7 +14,7 @@ from google.oauth2 import service_account  # type: ignore[import-untyped]
 from google.oauth2.credentials import (  # type: ignore[import-untyped]
     Credentials as GoogleOAuthCredentials,
 )
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import Environment
 
 from app.birthday_rules import Clock, build_clock, is_birthday_today, parse_birthday
 from app.config import Config
@@ -24,6 +24,12 @@ from app.email.base import (
     EmailProvider,
     EmailSendError,
     InlineImage,
+)
+from app.email_content import (
+    INLINE_IMAGE_CONTENT_ID,
+    SIGNATURE_CLOSING,
+    SIGNATURE_INTRO,
+    build_email_template_environment,
 )
 from app.email.gmail import GmailProvider
 from app.models import Client
@@ -45,7 +51,6 @@ _DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 # one cached token) rather than the narrower per-call scope used for service
 # accounts, since an installed-app flow can't silently re-consent mid-run.
 _OAUTH_SCOPES = [_GMAIL_SCOPE, _SHEETS_SCOPE, _DRIVE_SCOPE]
-_TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 _UNSET = object()
 
 
@@ -331,10 +336,7 @@ def _parse_last_sent_year(raw: object) -> int | None:
 
 
 def _build_template_environments() -> tuple[Environment, Environment]:
-    html_env = Environment(
-        loader=FileSystemLoader(str(_TEMPLATES_DIR)),
-        autoescape=select_autoescape(["html", "xml"]),
-    )
+    html_env = build_email_template_environment()
     subject_env = Environment(autoescape=False)
     return html_env, subject_env
 
@@ -343,7 +345,7 @@ def _build_inline_image(config: Config) -> InlineImage | None:
     if config.birthday_image_mode != "local":
         return None
     return InlineImage(
-        content_id="birthday_banner",
+        content_id=INLINE_IMAGE_CONTENT_ID,
         data=config.birthday_image_path.read_bytes(),
         mime_type=_sniff_image_mime_type(config.birthday_image_path),
     )
@@ -471,6 +473,9 @@ def _render_message(
         "image_alt": config.birthday_image_alt,
         "image_width": config.birthday_image_width,
         "image_url": config.birthday_image_url,
+        "inline_image_content_id": INLINE_IMAGE_CONTENT_ID,
+        "signature_closing": SIGNATURE_CLOSING,
+        "signature_intro": SIGNATURE_INTRO,
         "from_name": config.email_from_name,
     }
     html_body = html_env.get_template("birthday_email.html").render(template_context)

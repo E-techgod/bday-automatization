@@ -9,24 +9,33 @@ from types import SimpleNamespace
 import pytest
 from googleapiclient.errors import HttpError  # type: ignore[import-untyped]
 from httplib2 import HttpLib2Error  # type: ignore[import-untyped]
-from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.config import Config
 from app.email.base import AmbiguousSendError, EmailMessage, EmailSendError, InlineImage
+from app.email_content import (
+    DEFAULT_BIRTHDAY_IMAGE_ALT,
+    DEFAULT_SALUTATION,
+    EMAIL_SUBJECT_TEMPLATE_DEFAULT,
+    INLINE_IMAGE_CONTENT_ID,
+    SIGNATURE_CLOSING,
+    SIGNATURE_INTRO,
+    build_email_template_environment,
+)
 from app.email.gmail import GmailProvider
 
 
 def test_gmail_send_builds_expected_related_mime_message() -> None:
     service = _FakeGmailService()
     provider = GmailProvider(config=_build_config(), service_factory=lambda: service)
+    message = _build_message(image_mode="local")
 
-    provider.send(_build_message(image_mode="local"))
+    provider.send(message)
 
     parsed_message = _parse_sent_message(service)
 
     assert parsed_message["From"] == "Example Sender <sender@example.com>"
     assert parsed_message["To"] == "Test Person <test.person@example.com>"
-    assert parsed_message["Subject"] == "Feliz cumpleaños, Test Person! 🎉"
+    assert parsed_message["Subject"] == message.subject
     assert parsed_message.get_content_subtype() == "related"
 
     related_parts = parsed_message.get_payload()
@@ -40,14 +49,13 @@ def test_gmail_send_builds_expected_related_mime_message() -> None:
         "plain",
         "html",
     ]
-    assert "Feliz cumpleaños, Test Person! 🎉" in alternative_payload[0].get_content()
-    assert "Hi Test Person," in alternative_payload[0].get_content()
-    assert "cid:birthday_banner" in alternative_payload[1].get_content()
+    assert alternative_payload[0].get_content() == message.text_body
+    assert alternative_payload[1].get_content() == message.html_body
 
     image_part = related_parts[1]
     assert image_part.get_content_maintype() == "image"
     assert image_part.get_content_subtype() == "jpeg"
-    assert image_part["Content-ID"] == "<birthday_banner>"
+    assert image_part["Content-ID"] == f"<{INLINE_IMAGE_CONTENT_ID}>"
     assert "inline" in image_part["Content-Disposition"]
 
 
@@ -60,7 +68,9 @@ def test_gmail_send_local_mode_attaches_inline_image() -> None:
     parsed_message = _parse_sent_message(service)
 
     assert len(parsed_message.get_payload()) == 2
-    assert parsed_message.get_payload()[1]["Content-ID"] == "<birthday_banner>"
+    assert parsed_message.get_payload()[1]["Content-ID"] == (
+        f"<{INLINE_IMAGE_CONTENT_ID}>"
+    )
 
 
 def test_gmail_send_url_mode_uses_remote_image_without_attachment() -> None:
@@ -74,7 +84,7 @@ def test_gmail_send_url_mode_uses_remote_image_without_attachment() -> None:
 
     assert len(parsed_message.get_payload()) == 1
     assert "https://assets.example.com/birthday-banner.jpg" in html_part.get_content()
-    assert "cid:birthday_banner" not in html_part.get_content()
+    assert f"cid:{INLINE_IMAGE_CONTENT_ID}" not in html_part.get_content()
 
 
 def test_gmail_send_none_mode_has_no_image_reference_or_attachment() -> None:
@@ -87,8 +97,8 @@ def test_gmail_send_none_mode_has_no_image_reference_or_attachment() -> None:
     text_part, html_part = parsed_message.get_payload()[0].get_payload()
 
     assert len(parsed_message.get_payload()) == 1
-    assert "cid:birthday_banner" not in text_part.get_content()
-    assert "cid:birthday_banner" not in html_part.get_content()
+    assert f"cid:{INLINE_IMAGE_CONTENT_ID}" not in text_part.get_content()
+    assert f"cid:{INLINE_IMAGE_CONTENT_ID}" not in html_part.get_content()
     assert (
         "https://assets.example.com/birthday-banner.jpg" not in text_part.get_content()
     )
@@ -247,7 +257,7 @@ def _build_config() -> Config:
         email_provider="gmail",
         email_from_name="Example Sender",
         email_from_address="sender@example.com",
-        email_subject_template="Feliz cumpleaños, {{name}}! 🎉",
+        email_subject_template=EMAIL_SUBJECT_TEMPLATE_DEFAULT,
         google_auth_mode="service_account",
         google_credentials_file=Path("synthetic-credentials.json"),
         google_impersonate_subject="sender@example.com",
@@ -257,7 +267,7 @@ def _build_config() -> Config:
         birthday_image_mode="local",
         birthday_image_path=Path("app/assets/birthday_banner.jpg"),
         birthday_image_url="https://assets.example.com/birthday-banner.jpg",
-        birthday_image_alt="Happy Birthday banner",
+        birthday_image_alt=DEFAULT_BIRTHDAY_IMAGE_ALT,
         birthday_image_width=600,
         state_backend="sqlite",
         state_db_path=Path("synthetic-state.db"),
@@ -272,16 +282,17 @@ def _build_config() -> Config:
 def _build_message(
     *, image_mode: str, inline_image_mime_type: str = "image/jpeg"
 ) -> EmailMessage:
-    template_env = Environment(
-        loader=FileSystemLoader("app/templates"),
-        autoescape=select_autoescape(["html", "xml"]),
-    )
+    template_env = build_email_template_environment()
     template_context = {
         "name": "Test Person",
+        "salutation": DEFAULT_SALUTATION,
         "image_mode": image_mode,
-        "image_alt": "Happy Birthday banner",
+        "image_alt": DEFAULT_BIRTHDAY_IMAGE_ALT,
         "image_width": 600,
         "image_url": "https://assets.example.com/birthday-banner.jpg",
+        "inline_image_content_id": INLINE_IMAGE_CONTENT_ID,
+        "signature_closing": SIGNATURE_CLOSING,
+        "signature_intro": SIGNATURE_INTRO,
         "from_name": "Example Sender",
     }
     html_body = template_env.get_template("birthday_email.html").render(
@@ -291,7 +302,7 @@ def _build_message(
     inline_image = None
     if image_mode == "local":
         inline_image = InlineImage(
-            content_id="birthday_banner",
+            content_id=INLINE_IMAGE_CONTENT_ID,
             data=b"synthetic-jpeg-image-bytes",
             mime_type=inline_image_mime_type,
         )
@@ -301,7 +312,7 @@ def _build_message(
         to_name="Test Person",
         from_name="Example Sender",
         from_address="sender@example.com",
-        subject="Feliz cumpleaños, Test Person! 🎉",
+        subject=_render_subject("Test Person"),
         html_body=html_body,
         text_body=text_body,
         inline_image=inline_image,
@@ -319,3 +330,7 @@ def _http_error(status: int, reason: str) -> HttpError:
         resp=SimpleNamespace(status=status, reason=reason),
         content=b'{"error":"synthetic"}',
     )
+
+
+def _render_subject(name: str) -> str:
+    return EMAIL_SUBJECT_TEMPLATE_DEFAULT.replace("{{name}}", name)

@@ -4,6 +4,7 @@ from datetime import date
 
 import pytest
 
+from app.email_content import DEFAULT_SALUTATION, FEMALE_SALUTATION, MALE_SALUTATION
 from app.models import Client, resolve_salutation
 
 
@@ -12,7 +13,7 @@ from app.models import Client, resolve_salutation
     ["Mujer", "Femenino", "F", "Female"],
 )
 def test_resolve_salutation_female_values_map_to_estimada(gender: str) -> None:
-    assert resolve_salutation(gender) == "Estimada"
+    assert resolve_salutation(gender) == FEMALE_SALUTATION
 
 
 @pytest.mark.parametrize(
@@ -20,30 +21,30 @@ def test_resolve_salutation_female_values_map_to_estimada(gender: str) -> None:
     ["Hombre", "Masculino", "M", "Male"],
 )
 def test_resolve_salutation_male_values_map_to_estimado(gender: str) -> None:
-    assert resolve_salutation(gender) == "Estimado"
+    assert resolve_salutation(gender) == MALE_SALUTATION
 
 
 def test_resolve_salutation_missing_gender_defaults_to_estimado_a() -> None:
-    assert resolve_salutation(None) == "Estimado/a"
+    assert resolve_salutation(None) == DEFAULT_SALUTATION
 
 
 def test_resolve_salutation_empty_gender_defaults_to_estimado_a() -> None:
-    assert resolve_salutation("") == "Estimado/a"
+    assert resolve_salutation("") == DEFAULT_SALUTATION
 
 
 def test_resolve_salutation_unknown_gender_defaults_to_estimado_a() -> None:
-    assert resolve_salutation("Nonbinary") == "Estimado/a"
+    assert resolve_salutation("Nonbinary") == DEFAULT_SALUTATION
 
 
 @pytest.mark.parametrize(
     ("gender", "expected"),
     [
-        ("mujer", "Estimada"),
-        ("MUJER", "Estimada"),
-        ("MuJeR", "Estimada"),
-        ("male", "Estimado"),
-        ("MALE", "Estimado"),
-        ("MaLe", "Estimado"),
+        ("mujer", FEMALE_SALUTATION),
+        ("MUJER", FEMALE_SALUTATION),
+        ("MuJeR", FEMALE_SALUTATION),
+        ("male", MALE_SALUTATION),
+        ("MALE", MALE_SALUTATION),
+        ("MaLe", MALE_SALUTATION),
     ],
 )
 def test_resolve_salutation_is_case_insensitive(gender: str, expected: str) -> None:
@@ -53,11 +54,11 @@ def test_resolve_salutation_is_case_insensitive(gender: str, expected: str) -> N
 @pytest.mark.parametrize(
     ("gender", "expected"),
     [
-        ("  Mujer  ", "Estimada"),
-        ("\tFemale\n", "Estimada"),
-        ("  Hombre  ", "Estimado"),
-        ("\tMale\n", "Estimado"),
-        ("   ", "Estimado/a"),
+        ("  Mujer  ", FEMALE_SALUTATION),
+        ("\tFemale\n", FEMALE_SALUTATION),
+        ("  Hombre  ", MALE_SALUTATION),
+        ("\tMale\n", MALE_SALUTATION),
+        ("   ", DEFAULT_SALUTATION),
     ],
 )
 def test_resolve_salutation_strips_surrounding_whitespace(
@@ -75,7 +76,7 @@ def test_client_salutation_property_reflects_gender() -> None:
         gender="Femenino",
     )
 
-    assert client.salutation == "Estimada"
+    assert client.salutation == FEMALE_SALUTATION
 
 
 def test_client_salutation_property_defaults_when_gender_missing() -> None:
@@ -86,4 +87,4 @@ def test_client_salutation_property_defaults_when_gender_missing() -> None:
         row_index=2,
     )
 
-    assert client.salutation == "Estimado/a"
+    assert client.salutation == DEFAULT_SALUTATION
