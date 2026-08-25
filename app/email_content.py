@@ -7,6 +7,7 @@ from jinja2 import DictLoader, Environment, select_autoescape
 EMAIL_SUBJECT_TEMPLATE_DEFAULT: Final = "Feliz cumpleaños, {{name}}! 🎉"
 
 ####################### THE ONE CURRENLTY USING ####################
+######################## TO Modify From Name and Subject template go to .env ###############
 EMAIL_HTML_TEMPLATE: Final = """<!DOCTYPE html>
 <html lang="es">
   <body style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; line-height: 1.5; color: #1e293b; max-width: 540px; margin: 0 auto; padding: 24px 16px; background-color: #ffffff;">
