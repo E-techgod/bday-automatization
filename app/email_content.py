@@ -7,7 +7,7 @@ from jinja2 import DictLoader, Environment, select_autoescape
 # ¡Feliz cumpleaños, {{ name ~ ' ' ~ last_name }}! 🎉
 # "Feliz cumpleaños, {{ display_name }}! 🎉"
 EMAIL_SUBJECT_TEMPLATE_DEFAULT: Final = "Feliz cumpleaños, {{ display_name }}! 🎉"
-BP_REMINDER_TO_ADDRESS_DEFAULT: Final = "jorge.arellano@quirongroup.com"
+BP_REMINDER_TO_ADDRESS_DEFAULT: Final = "elias.arellano@americansmartbusiness.com"
 BP_REMINDER_TO_NAME_DEFAULT: Final = "Jorge Arellano"
 BP_REMINDER_SUBJECT_TEMPLATE: Final = (
     "Recordatorio BP: llamada de cumpleaños para {{ display_name }}"
@@ -103,3 +103,4 @@ def build_email_template_environment() -> Environment:
         ),
         autoescape=select_autoescape(["html", "xml"]),
     )
+

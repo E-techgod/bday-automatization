@@ -67,8 +67,8 @@ class XlsxDriveProvider(SpreadsheetProvider):
             ) from exc
         try:
             worksheet = workbook.worksheets[0]
-            # print("WORKBOOK SHEETS:", workbook.sheetnames)
-            # print("SELECTED SHEET:", workbook.worksheets[0].title)
+            print("WORKBOOK SHEETS:", workbook.sheetnames)
+            print("SELECTED SHEET:", workbook.worksheets[0].title)
             row_iterator = worksheet.iter_rows(values_only=True)
             try:
                 raw_header_row = next(row_iterator)
@@ -85,7 +85,14 @@ class XlsxDriveProvider(SpreadsheetProvider):
                 ):
                     break
                 rows.append(build_row_dict(materialized_row, resolved_headers))
+
+            for idx, row in enumerate(rows[:5]):
+                print(f"\n--- Row {idx + 1} ---")
+                for key, value in row.items():
+                    print(f"  {key}: {value}")
+
             return rows
+
         finally:
             workbook.close()
 

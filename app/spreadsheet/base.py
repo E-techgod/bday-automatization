@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import unicodedata
 
 from app.config import Config
 
@@ -59,6 +60,18 @@ def resolve_headers(raw_header_row: list[str], config: Config) -> dict[str, int]
     if optional_gender_index is not None:
         resolved[config.gender_column] = optional_gender_index
 
+    optional_service_line_index = normalized_headers.get(
+        _normalize_header(config.service_line_column)
+    )
+    if optional_service_line_index is not None:
+        resolved[config.service_line_column] = optional_service_line_index
+
+    optional_mobile_phone_index = normalized_headers.get(
+        _normalize_header(config.mobile_phone_column)
+    )
+    if optional_mobile_phone_index is not None:
+        resolved[config.mobile_phone_column] = optional_mobile_phone_index
+
     return resolved
 
 
@@ -104,6 +117,10 @@ def _validate_distinct_configured_headers(config: Config) -> None:
         configured_headers.append(config.last_name_column)
     if _normalize_header(config.gender_column):
         configured_headers.append(config.gender_column)
+    if _normalize_header(config.service_line_column):
+        configured_headers.append(config.service_line_column)
+    if _normalize_header(config.mobile_phone_column):
+        configured_headers.append(config.mobile_phone_column)
 
     seen_by_normalized: dict[str, str] = {}
     for configured_header in configured_headers:
@@ -118,7 +135,11 @@ def _validate_distinct_configured_headers(config: Config) -> None:
 
 
 def _normalize_header(value: str) -> str:
-    return value.strip().casefold()
+    normalized = unicodedata.normalize("NFKD", value.strip())
+    without_diacritics = "".join(
+        character for character in normalized if not unicodedata.combining(character)
+    )
+    return without_diacritics.casefold()
 
 
 def _cell_has_value(raw_row: list[object], column_index: int | None) -> bool:

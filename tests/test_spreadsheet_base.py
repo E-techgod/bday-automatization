@@ -9,7 +9,7 @@ from app.email_content import (
     DEFAULT_BIRTHDAY_IMAGE_ALT,
     EMAIL_SUBJECT_TEMPLATE_DEFAULT,
 )
-from app.spreadsheet.base import SpreadsheetError, resolve_headers
+from app.spreadsheet.base import SpreadsheetError, build_row_dict, resolve_headers
 
 
 def test_resolve_headers_raises_for_colliding_configured_columns() -> None:
@@ -46,12 +46,49 @@ def test_resolve_headers_includes_gender_when_present() -> None:
     assert resolved["Gender"] == 1
 
 
+def test_resolve_headers_includes_service_line_and_mobile_when_present() -> None:
+    config = _build_config()
+
+    resolved = resolve_headers(
+        ["Name", "Línea de servicio", "Móvil", "Email", "Birthday"], config
+    )
+
+    assert resolved["Línea de servicio"] == 1
+    assert resolved["Móvil"] == 2
+
+
+def test_resolve_headers_matches_service_line_without_diacritics() -> None:
+    config = _build_config()
+
+    resolved = resolve_headers(
+        ["Name", "Linea de Servicio", "Movil", "Email", "Birthday"], config
+    )
+
+    assert resolved["Línea de servicio"] == 1
+    assert resolved["Móvil"] == 2
+
+
 def test_resolve_headers_omits_gender_when_absent() -> None:
     config = _build_config()
 
     resolved = resolve_headers(["Name", "Email", "Birthday"], config)
 
     assert "Gender" not in resolved
+
+
+def test_build_row_dict_preserves_optional_service_line_and_mobile_values() -> None:
+    config = _build_config()
+    resolved = resolve_headers(
+        ["Name", "Linea de Servicio", "Movil", "Email", "Birthday"], config
+    )
+
+    row = build_row_dict(
+        ["Test Person", "BP", "5551234", "test.person@example.com", "1/1/2000"],
+        resolved,
+    )
+
+    assert row["Línea de servicio"] == "BP"
+    assert row["Móvil"] == "5551234"
 
 
 def _build_config(*, birthday_column: str = "Birthday") -> Config:
