@@ -60,6 +60,8 @@ class GmailProvider(EmailProvider):
         mime_message = MIMEMultipart("related")
         mime_message["From"] = _format_mailbox(message.from_name, message.from_address)
         mime_message["To"] = _format_mailbox(message.to_name, message.to_email)
+        if message.cc_emails:
+            mime_message["Cc"] = ", ".join(message.cc_emails)
         mime_message["Subject"] = message.subject
 
         alternative_part = MIMEMultipart("alternative")

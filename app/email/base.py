@@ -21,6 +21,7 @@ class EmailMessage:
     html_body: str
     text_body: str
     inline_image: InlineImage | None
+    cc_emails: tuple[str, ...] = ()
 
 
 class EmailSendError(RuntimeError):

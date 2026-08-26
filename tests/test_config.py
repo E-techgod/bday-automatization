@@ -15,6 +15,7 @@ from app.config import (
     load_config,
 )
 from app.email_content import (
+    BPReminderRecipients,
     DEFAULT_BIRTHDAY_IMAGE_ALT,
     EMAIL_SUBJECT_TEMPLATE_DEFAULT,
 )
@@ -158,6 +159,135 @@ def test_load_config_invalid_google_impersonate_subject_raises(
     with pytest.raises(
         ConfigError,
         match="GOOGLE_IMPERSONATE_SUBJECT must be a valid email address",
+    ):
+        load_config()
+
+
+def test_load_config_bp_reminder_cc_defaults_to_empty_tuple(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.delenv("BP_REMINDER_CC", raising=False)
+
+    config = load_config()
+
+    assert config.bp_reminder_recipients == BPReminderRecipients()
+
+
+def test_load_config_bp_reminder_to_address_uses_configured_value(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.setenv(
+        "BP_REMINDER_TO_ADDRESS_DEFAULT", "lead.bp@quirongroup.com"
+    )
+
+    config = load_config()
+
+    assert config.bp_reminder_recipients == BPReminderRecipients(
+        to_email="lead.bp@quirongroup.com"
+    )
+
+
+def test_load_config_bp_reminder_to_address_rejects_invalid_email(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.setenv("BP_REMINDER_TO_ADDRESS_DEFAULT", "not-an-email")
+
+    with pytest.raises(
+        ConfigError,
+        match="BP_REMINDER_TO_ADDRESS_DEFAULT must be a valid email address",
+    ):
+        load_config()
+
+
+def test_load_config_bp_reminder_cc_accepts_single_address(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.setenv("BP_REMINDER_CC", "manager1@quirongroup.com")
+
+    config = load_config()
+
+    assert config.bp_reminder_recipients == BPReminderRecipients(
+        cc_emails=("manager1@quirongroup.com",)
+    )
+
+
+def test_load_config_bp_reminder_cc_accepts_multiple_addresses(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.setenv(
+        "BP_REMINDER_CC",
+        "manager1@quirongroup.com,manager2@quirongroup.com",
+    )
+
+    config = load_config()
+
+    assert config.bp_reminder_recipients == BPReminderRecipients(
+        cc_emails=("manager1@quirongroup.com", "manager2@quirongroup.com")
+    )
+
+
+def test_load_config_bp_reminder_cc_trims_whitespace_and_drops_blank_entries(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.setenv(
+        "BP_REMINDER_CC",
+        " manager1@quirongroup.com , , manager2@quirongroup.com  , ",
+    )
+
+    config = load_config()
+
+    assert config.bp_reminder_recipients == BPReminderRecipients(
+        cc_emails=("manager1@quirongroup.com", "manager2@quirongroup.com")
+    )
+
+
+def test_load_config_bp_reminder_cc_deduplicates_addresses_case_insensitively(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.setenv(
+        "BP_REMINDER_CC",
+        "manager1@quirongroup.com, MANAGER1@QUIRONGROUP.COM, manager2@quirongroup.com",
+    )
+
+    config = load_config()
+
+    assert config.bp_reminder_recipients == BPReminderRecipients(
+        cc_emails=("manager1@quirongroup.com", "manager2@quirongroup.com")
+    )
+
+
+def test_load_config_bp_reminder_cc_rejects_invalid_address(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_path, credentials_path = _create_files(tmp_path)
+    _set_base_env(monkeypatch, image_path, credentials_path)
+    monkeypatch.setenv("BP_REMINDER_CC", "manager1@quirongroup.com, not-an-email")
+
+    with pytest.raises(
+        ConfigError,
+        match="BP_REMINDER_CC must be a valid email address",
     ):
         load_config()
 
@@ -776,6 +906,8 @@ def _set_base_env(
         "EMAIL_FROM_NAME": "Sender Name",
         "EMAIL_FROM_ADDRESS": "sender@example.com",
         "EMAIL_SUBJECT_TEMPLATE": EMAIL_SUBJECT_TEMPLATE_DEFAULT,
+        "BP_REMINDER_TO_ADDRESS_DEFAULT": "",
+        "BP_REMINDER_CC": "",
         "GOOGLE_CREDENTIALS_FILE": str(credentials_path),
         "GOOGLE_IMPERSONATE_SUBJECT": "",
         "BIRTHDAY_IMAGE_MODE": "local",

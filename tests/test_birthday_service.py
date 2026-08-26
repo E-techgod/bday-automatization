@@ -16,6 +16,7 @@ from app.birthday_service import (
 )
 from app.config import Config, ConfigError
 from app.email_content import (
+    BPReminderRecipients,
     BP_REMINDER_TO_ADDRESS_DEFAULT,
     BP_STATUS_LABEL,
     DEFAULT_BIRTHDAY_IMAGE_ALT,
@@ -373,6 +374,7 @@ def test_bp_client_sends_internal_reminder_instead_of_client_email() -> None:
     sent_message = email_provider.sent_messages[0]
     assert sent_message.to_email == BP_REMINDER_TO_ADDRESS_DEFAULT
     assert sent_message.to_name == "Jorge Arellano"
+    assert sent_message.cc_emails == ()
     assert sent_message.subject == "Recordatorio BP: llamada de cumpleaños para Test Person"
     assert "Nombre completo: Test Person" in sent_message.text_body
     assert "Fecha de cumpleaños: 2000-01-01" in sent_message.text_body
@@ -441,8 +443,73 @@ def test_non_bp_clients_keep_standard_birthday_email_path() -> None:
     assert summary == Summary(inspected=1, matched=1, sent=1)
     sent_message = email_provider.sent_messages[0]
     assert sent_message.to_email == "standard.client@example.com"
+    assert sent_message.cc_emails == ()
     assert sent_message.subject == "Feliz cumpleaños, Standard Client! 🎉"
     assert FEMALE_SALUTATION in sent_message.html_body
+
+
+def test_bp_client_adds_single_configured_cc_recipient() -> None:
+    email_provider = FakeEmailProvider()
+
+    run_birthday_job(
+        replace(
+            _build_config(),
+            bp_reminder_recipients=BPReminderRecipients(
+                cc_emails=("manager1@quirongroup.com",)
+            ),
+        ),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="Single",
+                    last_name="Cc",
+                    email="single.cc@example.com",
+                    birthday="1/1/2000",
+                    service_line="BP",
+                )
+            ]
+        ),
+        state_store=FakeStateStore(),
+        email_provider=email_provider,
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert email_provider.sent_messages[0].cc_emails == ("manager1@quirongroup.com",)
+
+
+def test_bp_client_adds_multiple_configured_cc_recipients() -> None:
+    email_provider = FakeEmailProvider()
+
+    run_birthday_job(
+        replace(
+            _build_config(),
+            bp_reminder_recipients=BPReminderRecipients(
+                cc_emails=(
+                    "manager1@quirongroup.com",
+                    "manager2@quirongroup.com",
+                )
+            ),
+        ),
+        spreadsheet_provider=FakeSpreadsheetProvider(
+            rows=[
+                _row(
+                    name="Multiple",
+                    last_name="Cc",
+                    email="multiple.cc@example.com",
+                    birthday="1/1/2000",
+                    service_line="BP",
+                )
+            ]
+        ),
+        state_store=FakeStateStore(),
+        email_provider=email_provider,
+        clock=FixedClock(date(2026, 1, 1)),
+    )
+
+    assert email_provider.sent_messages[0].cc_emails == (
+        "manager1@quirongroup.com",
+        "manager2@quirongroup.com",
+    )
 
 
 @pytest.mark.parametrize(
@@ -1930,6 +1997,7 @@ def _build_config(
         retry_max_attempts=3,
         retry_base_delay_seconds=0.25,
         log_level="INFO",
+        bp_reminder_recipients=BPReminderRecipients(),
     )
 
 

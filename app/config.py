@@ -10,12 +10,16 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from app.email_content import (
+    BPReminderRecipients,
+    BP_REMINDER_CC_ENV_NAME,
+    BP_REMINDER_TO_ADDRESS_ENV_NAME,
     DEFAULT_BIRTHDAY_IMAGE_ALT,
     DEFAULT_BIRTHDAY_IMAGE_MODE,
     DEFAULT_BIRTHDAY_IMAGE_PATH,
     DEFAULT_BIRTHDAY_IMAGE_URL,
     DEFAULT_BIRTHDAY_IMAGE_WIDTH,
     EMAIL_SUBJECT_TEMPLATE_DEFAULT,
+    build_bp_reminder_recipients,
 )
 
 EMAIL_SUBJECT_TEMPLATE = ("EMAIL_SUBJECT_TEMPLATE", EMAIL_SUBJECT_TEMPLATE_DEFAULT)
@@ -103,6 +107,7 @@ class Config:
     retry_max_attempts: int
     retry_base_delay_seconds: float
     log_level: str
+    bp_reminder_recipients: BPReminderRecipients = BPReminderRecipients()
 
 
 def load_config() -> Config:
@@ -156,6 +161,7 @@ def load_config() -> Config:
         _get_env("GOOGLE_IMPERSONATE_SUBJECT", ""),
         email_from_address,
     )
+    bp_reminder_recipients = _load_bp_reminder_recipients()
 
     return Config(
         app_timezone=app_timezone,
@@ -214,6 +220,7 @@ def load_config() -> Config:
             _get_env("RETRY_BASE_DELAY_SECONDS", "1.0"),
         ),
         log_level=_get_env("LOG_LEVEL", "INFO"),
+        bp_reminder_recipients=bp_reminder_recipients,
     )
 
 
@@ -352,6 +359,16 @@ def _parse_google_impersonate_subject(value: str, email_from_address: str) -> st
     if not stripped_value:
         return email_from_address
     return _parse_email_value("GOOGLE_IMPERSONATE_SUBJECT", stripped_value)
+
+
+def _load_bp_reminder_recipients() -> BPReminderRecipients:
+    try:
+        return build_bp_reminder_recipients(
+            _get_env(BP_REMINDER_TO_ADDRESS_ENV_NAME, ""),
+            _get_env(BP_REMINDER_CC_ENV_NAME, ""),
+        )
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
 
 
 def _parse_timezone(value: str) -> str:

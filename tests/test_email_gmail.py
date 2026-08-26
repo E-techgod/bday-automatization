@@ -13,6 +13,7 @@ from httplib2 import HttpLib2Error  # type: ignore[import-untyped]
 from app.config import Config
 from app.email.base import AmbiguousSendError, EmailMessage, EmailSendError, InlineImage
 from app.email_content import (
+    BPReminderRecipients,
     DEFAULT_BIRTHDAY_IMAGE_ALT,
     DEFAULT_SALUTATION,
     EMAIL_SUBJECT_TEMPLATE_DEFAULT,
@@ -104,6 +105,24 @@ def test_gmail_send_none_mode_has_no_image_reference_or_attachment() -> None:
     )
     assert (
         "https://assets.example.com/birthday-banner.jpg" not in html_part.get_content()
+    )
+
+
+def test_gmail_send_includes_cc_header_when_configured() -> None:
+    service = _FakeGmailService()
+    provider = GmailProvider(config=_build_config(), service_factory=lambda: service)
+
+    provider.send(
+        _build_message(
+            image_mode="none",
+            cc_emails=("manager1@quirongroup.com", "manager2@quirongroup.com"),
+        )
+    )
+
+    parsed_message = _parse_sent_message(service)
+
+    assert parsed_message["Cc"] == (
+        "manager1@quirongroup.com, manager2@quirongroup.com"
     )
 
 
@@ -278,11 +297,15 @@ def _build_config() -> Config:
         retry_max_attempts=3,
         retry_base_delay_seconds=0.25,
         log_level="INFO",
+        bp_reminder_recipients=BPReminderRecipients(),
     )
 
 
 def _build_message(
-    *, image_mode: str, inline_image_mime_type: str = "image/jpeg"
+    *,
+    image_mode: str,
+    inline_image_mime_type: str = "image/jpeg",
+    cc_emails: tuple[str, ...] = (),
 ) -> EmailMessage:
     template_env = build_email_template_environment()
     template_context = {
@@ -318,6 +341,7 @@ def _build_message(
         html_body=html_body,
         text_body=text_body,
         inline_image=inline_image,
+        cc_emails=cc_emails,
     )
 
 

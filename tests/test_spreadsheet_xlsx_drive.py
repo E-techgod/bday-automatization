@@ -12,6 +12,7 @@ from openpyxl import Workbook
 from app.birthday_rules import parse_birthday
 from app.config import Config
 from app.email_content import (
+    BPReminderRecipients,
     DEFAULT_BIRTHDAY_IMAGE_ALT,
     EMAIL_SUBJECT_TEMPLATE_DEFAULT,
 )
@@ -424,4 +425,5 @@ def _build_config() -> Config:
         retry_max_attempts=3,
         retry_base_delay_seconds=1.0,
         log_level="INFO",
+        bp_reminder_recipients=BPReminderRecipients(),
     )

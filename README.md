@@ -122,6 +122,8 @@ The app resolves these logical columns from the header row:
 - `GENDER_COLUMN` optional, used only to pick a Spanish salutation
 - `SERVICE_LINE_COLUMN` optional, used to detect `BP` and override the standard email path
 - `MOBILE_PHONE_COLUMN` optional, used only in the BP reminder content
+- `BP_REMINDER_TO_ADDRESS_DEFAULT` optional, overrides the default BP primary recipient
+- `BP_REMINDER_CC` optional, used only for BP reminder email CC recipients
 
 `LAST_SENT_YEAR_COLUMN` is never the duplicate-send source of truth. The configured state backend is.
 
@@ -129,6 +131,8 @@ Routing rules:
 
 - If `SERVICE_LINE_COLUMN` contains `BP`, after splitting on common delimiters such as commas, semicolons, or slashes and normalizing case/whitespace, the client goes to the BP override path.
 - The BP override path does not email the client. It sends an internal reminder to `jorge.arellano@quirongroup.com` with the full name, birthday date, BP status, and a normalized mobile phone number from `MOBILE_PHONE_COLUMN`.
+- When `BP_REMINDER_TO_ADDRESS_DEFAULT` is set, it overrides the default BP primary recipient without changing the BP reminder name or the standard birthday path.
+- When `BP_REMINDER_CC` is set, the BP reminder also CCs the configured comma-separated addresses after trimming whitespace, dropping blanks, validating email format, and removing duplicates. Standard birthday emails are unchanged.
 - BP reminder phone handling removes every non-digit character from `Móvil` and keeps only `0-9`. If the normalized result has fewer than 7 digits, the reminder renders `Móvil: No disponible` and still sends the reminder.
 - If `BP` is not present, the standard personalized birthday email path is used.
 

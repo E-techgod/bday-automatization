@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from typing import Final
 
 from jinja2 import DictLoader, Environment, select_autoescape
 
 # ¡Feliz cumpleaños, {{ name ~ ' ' ~ last_name }}! 🎉
-# "Feliz cumpleaños, {{ display_name }}! 🎉"
+# "Feliz cumpleaños, {{ display_name }}! 🎉" = Full name
 EMAIL_SUBJECT_TEMPLATE_DEFAULT: Final = "Feliz cumpleaños, {{ display_name }}! 🎉"
 BP_REMINDER_TO_ADDRESS_DEFAULT: Final = "jorge.arellano@quirongroup.com"
 BP_REMINDER_TO_NAME_DEFAULT: Final = "Jorge Arellano"
+BP_REMINDER_TO_ADDRESS_ENV_NAME: Final = "BP_REMINDER_TO_ADDRESS_DEFAULT"
+BP_REMINDER_CC_ENV_NAME: Final = "BP_REMINDER_CC"
 BP_REMINDER_SUBJECT_TEMPLATE: Final = (
     "Recordatorio BP: llamada de cumpleaños para {{ display_name }}"
 )
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 ####################### THE ONE CURRENLTY USING ####################
 ######################## TO Modify From Name and Subject template go to .env ###############
@@ -91,6 +96,53 @@ BP_STATUS_LABEL: Final = "BP override activo"
 BP_FOLLOW_UP_TEXT: Final = "No se envió correo al cliente. Favor de realizar llamada de felicitación."
 
 
+@dataclass(frozen=True)
+class BPReminderRecipients:
+    to_email: str = BP_REMINDER_TO_ADDRESS_DEFAULT
+    to_name: str = BP_REMINDER_TO_NAME_DEFAULT
+    cc_emails: tuple[str, ...] = ()
+
+
+def build_bp_reminder_recipients(
+    configured_to_email: str | None = None,
+    configured_cc: str | None = None,
+) -> BPReminderRecipients:
+    return BPReminderRecipients(
+        to_email=_parse_bp_reminder_to_email(configured_to_email),
+        cc_emails=_parse_bp_reminder_cc_list(configured_cc or ""),
+    )
+
+
+def _parse_bp_reminder_to_email(value: str | None) -> str:
+    if value is None or not value.strip():
+        return BP_REMINDER_TO_ADDRESS_DEFAULT
+    candidate = value.strip().lower()
+    if _EMAIL_RE.fullmatch(candidate) is None:
+        raise ValueError(
+            f"{BP_REMINDER_TO_ADDRESS_ENV_NAME} must be a valid email address"
+        )
+    return candidate
+
+
+def _parse_bp_reminder_cc_list(value: str) -> tuple[str, ...]:
+    if not value.strip():
+        return ()
+
+    parsed: list[str] = []
+    seen: set[str] = set()
+    for raw_part in value.split(","):
+        candidate = raw_part.strip().lower()
+        if not candidate:
+            continue
+        if _EMAIL_RE.fullmatch(candidate) is None:
+            raise ValueError(f"{BP_REMINDER_CC_ENV_NAME} must be a valid email address")
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        parsed.append(candidate)
+    return tuple(parsed)
+
+
 def build_email_template_environment() -> Environment:
     return Environment(
         loader=DictLoader(
@@ -103,4 +155,3 @@ def build_email_template_environment() -> Environment:
         ),
         autoescape=select_autoescape(["html", "xml"]),
     )
-

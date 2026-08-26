@@ -29,8 +29,6 @@ from app.email.base import (
 from app.email_content import (
     BP_FOLLOW_UP_TEXT,
     BP_REMINDER_SUBJECT_TEMPLATE,
-    BP_REMINDER_TO_ADDRESS_DEFAULT,
-    BP_REMINDER_TO_NAME_DEFAULT,
     BP_STATUS_LABEL,
     INLINE_IMAGE_CONTENT_ID,
     SIGNATURE_CLOSING,
@@ -424,7 +422,7 @@ def _process_match(
     summary: Summary,
 ) -> Summary:
     if config.dry_run:
-        _log_dry_run(client)
+        _log_dry_run(config, client)
         return summary
 
     claim_result: ClaimResult | None = None
@@ -591,14 +589,15 @@ def _render_bp_call_reminder(
         display_name=client.display_name,
     )
     return EmailMessage(
-        to_email=BP_REMINDER_TO_ADDRESS_DEFAULT,
-        to_name=BP_REMINDER_TO_NAME_DEFAULT,
+        to_email=config.bp_reminder_recipients.to_email,
+        to_name=config.bp_reminder_recipients.to_name,
         from_name=config.email_from_name,
         from_address=config.email_from_address,
         subject=subject,
         html_body=html_body,
         text_body=text_body,
         inline_image=None,
+        cc_emails=config.bp_reminder_recipients.cc_emails,
     )
 
 
@@ -606,12 +605,16 @@ def _format_birthday_date(value: date) -> str:
     return value.isoformat()
 
 
-def _log_dry_run(client: Client) -> None:
+def _log_dry_run(config: Config, client: Client) -> None:
     if client.delivery_route == "bp_call_reminder":
+        cc_suffix = ""
+        if config.bp_reminder_recipients.cc_emails:
+            cc_suffix = f" (cc: {', '.join(config.bp_reminder_recipients.cc_emails)})"
         LOGGER.info(
-            "[DRY RUN] would send BP birthday call reminder for %s to %s",
+            "[DRY RUN] would send BP birthday call reminder for %s to %s%s",
             client.display_name,
-            BP_REMINDER_TO_ADDRESS_DEFAULT,
+            config.bp_reminder_recipients.to_email,
+            cc_suffix,
         )
         return
     LOGGER.info(
@@ -623,10 +626,14 @@ def _log_dry_run(client: Client) -> None:
 
 def _log_sent_message(client: Client, message: EmailMessage) -> None:
     if client.delivery_route == "bp_call_reminder":
+        cc_suffix = ""
+        if message.cc_emails:
+            cc_suffix = f" (cc: {', '.join(message.cc_emails)})"
         LOGGER.info(
-            "BP birthday call reminder sent for %s to %s",
+            "BP birthday call reminder sent for %s to %s%s",
             client.email,
             message.to_email,
+            cc_suffix,
         )
         return
     LOGGER.info("birthday email sent to %s", client.email)
